@@ -1,0 +1,486 @@
+importScripts("detection.js", "fs-switch.js");
+const DEFAULT_STATE = {
+  autoEnabled: false,
+  autoBlockMode: "MANUAL",
+  autoCooldowns: {},
+  monitoringEnabled: true,
+  grafana: {
+    "99.153": { value: null, history: [], updatedAt: null },
+    "99.155": { value: null, history: [], updatedAt: null }
+  },
+  opensips: {
+    "99.153": { nodes: [], updatedAt: null, diagnostic: null },
+    "99.155": { nodes: [], updatedAt: null, diagnostic: null }
+  },
+  freeswitch: { nodes: [], numbers: [], updatedAt: null },
+  alerts: [],
+  pendingAutoActions: [],
+  confirmedAutoActions: {},
+  fsStates: {},
+  events: [],
+  config: {...Detection.CONFIG},
+  detectionVersion: 2,
+  eventKeys: {}
+};
+
+async function getState() {
+  const r = await chrome.storage.local.get(["state","fsSwitch"]);
+  if(!r.state) return structuredClone(DEFAULT_STATE);
+  const base=structuredClone(DEFAULT_STATE);
+  const state={
+    ...base,
+    ...r.state,
+    grafana:{...base.grafana,...(r.state.grafana||{})},
+    opensips:{...base.opensips,...(r.state.opensips||{})},
+    config:{...base.config,...(r.state.config||{}),baselineSamples:Detection.CONFIG.baselineSamples,sampleIntervalMs:Detection.CONFIG.sampleIntervalMs,groupObserveMs:Detection.CONFIG.groupObserveMs,staleMs:45000,sampleGapMs:75000,
+      scheduledPauseStartMinute:700,
+      backupBlockWaitMs:r.state.config?.backupBlockWaitMs===90000?15000:(r.state.config?.backupBlockWaitMs??15000),
+      freeSwitchAutomaticGapMs:r.state.config?.freeSwitchAutomaticGapMs===10000?5000:(r.state.config?.freeSwitchAutomaticGapMs??5000)}
+  };
+  if(r.state.detectionVersion!==2){
+    for(const [key,f] of Object.entries(state.fsStates)){
+      if(f.incident?.locked||f.incident?.autoExecuted||["COOLDOWN","RECOVERING"].includes(f.state)){
+        f.group=key.split("|")[0]; f.key=key; f.history=[];
+        f.incident={...f.incident,id:f.incident?.id||key,locked:true,autoExecuted:true,switchedAt:f.incident?.switchedAt||f.switchedAt||Date.now()};
+        f.state="COOLDOWN";
+      }else delete state.fsStates[key];
+    }
+    state.pendingAutoActions=[];state.detectionVersion=2;
+  }
+  // Older versions entered cooldown before receiving a successful page result.
+  for(const f of Object.values(state.fsStates||{})){
+    if(f.incident&&(f.incident.actionPending||f.incident.actionUncertain)&&
+      !f.incident.autoExecuted&&!f.incident.manualExecuted){
+      f.state='SUSPECTED';f.incident.locked=true;
+      f.incident.switchedAt=null;f.switchedAt=null;f.incident.stableSince=null;
+    }
+  }
+  const retained=(state.events||[]).filter(e=>e.at>Date.now()-3*86400000);
+  state.events=retained;
+  state.fsSwitchEnabled=!!r.fsSwitch?.enabled;
+  state.rotationBarriers=Detection.rotationBarriers(r.fsSwitch);
+  return state;
+}
+async function saveState(state) { await chrome.storage.local.set({state}); }
+
+const keyOf=Detection.keyOf;
+function classify(state){Detection.refreshAlerts(state,Date.now());return state;}
+
+async function broadcastMonitoring(enabled){
+  const tabs=await chrome.tabs.query({
+    url:["http://10.10.99.153/*","http://10.10.99.155/*"]
+  });
+  for(const tab of tabs){
+    if(!tab.id) continue;
+    chrome.tabs.sendMessage(tab.id,{type:"MONITORING_CHANGED",enabled}).catch(()=>{});
+  }
+}
+
+
+// All extension status writes share the worker message queue and this spacing.
+// Keep the timestamp in storage so a worker restart does not erase the gap.
+function nextFreeSwitchAt(state,group){
+  const last=state.lastFreeSwitchAction;
+  if(group&&last?.group&&last.group!==group)return last.at+2000;
+  return state.freeSwitchNextActionAt||0;
+}
+async function waitForFreeSwitch(state,group){
+  const delay=Math.max(0,nextFreeSwitchAt(state,group)-Date.now());
+  if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+}
+let statusWriteInProgress=false;
+async function sendFreeSwitchStatus(state,tabId,payload,automatic=false){
+  // Reserve before sending; the DOM can update before the SQLite transaction
+  // finishes. Reserve a longer quiet period for unattended automatic writes.
+  const gap=Math.max(5000,automatic?(state.config.freeSwitchAutomaticGapMs||5000):(state.config.freeSwitchActionGapMs||5000));
+  state.freeSwitchNextActionAt=Date.now()+gap;
+  await saveState(state);
+  statusWriteInProgress=true;
+  try{return await chrome.tabs.sendMessage(tabId,payload);}
+  finally{
+    statusWriteInProgress=false;
+    state.freeSwitchNextActionAt=Date.now()+gap;
+    state.lastFreeSwitchAction={group:payload.profile==='COLLECTION'?'99.153':payload.profile==='TELESALE'?'99.155':null,at:Date.now()};
+    await saveState(state);
+  }
+}
+
+async function rotationFeature(){const r=await chrome.storage.local.get('fsSwitch');return r.fsSwitch||{};}
+function rotationHeld(state,feature,f){return typeof FsSwitch!=='undefined'&&FsSwitch.holds(state,feature,f,Date.now());}
+function processingStatus(state,feature){
+  const now=Date.now();state.processingStatus={};
+  for(const [key,f] of Object.entries(state.fsStates||{})){
+    if(f.state!=='SUSPECTED')continue;
+    let reason='';
+    if(!state.monitoringEnabled)reason='MONITOR đang OFF.';
+    else if(Detection.pausedFor(state,f.group))reason='Nhóm đang nghỉ theo lịch.';
+    else if(state.fsTestExclusions?.[`${f.group}|${f.fs}`])reason='FS còn khóa test OpenSIPS; không BLOCK số đang test.';
+    else if(f.groupId==null)reason='Chưa đọc được Group ID; refresh tab OpenSIPS.';
+    else if(f.groupId!==(f.group==='99.153'?2:3))reason='Group ID không thuộc nhóm đang chạy; không BLOCK.';
+    else if(!Detection.isFsActive(state,f,now))reason='Group ID đã quá 45 giây chưa cập nhật; kiểm tra tab OpenSIPS.';
+    else if(now-f.updatedAt>state.config.staleMs)reason='VT đã cũ; chờ dữ liệu mới.';
+    else if(!Detection.groupActionGate(state,f,now).ready)reason=Detection.groupActionGate(state,f,now).reason;
+    else if(!Detection.backupReady(state,f,now))reason='BLOCK dự phòng đang chờ nhóm thay FS hoàn tất và đánh giá VT mới.';
+    else if(rotationHeld(state,feature,f)){
+      const reserved=feature.quarantined?.[`${f.group}|${f.fs}`];
+      reason=reserved?'FS đang khóa trong lượt Thay FS; xem bước/lỗi trên trang THAY FS.':
+        feature.mode==='MANUAL'?'BACKUP ≤ ngưỡng: chờ xác nhận THAY FS. Mở nút THAY FS → Kiểm tra và xác nhận.':
+        'BACKUP ≤ ngưỡng: chờ lượt THAY FS tự động.';
+      if(f.rotationError)reason+=' '+f.rotationError;
+    }else if(f.incident?.autoExecuted)reason='Đã xác nhận BLOCKED; chờ đồng bộ phục hồi.';
+    else if(f.incident?.locked)reason=f.incident.actionPending?'Đang chuyển trạng thái, chưa hoàn tất.':f.actionError||'Kết quả BLOCK chưa xác minh; kiểm tra FreeSWITCH.';
+    else reason=f.actionError||(!state.autoEnabled?'AUTO BLOCK đang OFF.':state.autoBlockMode==='AUTOMATIC'?'Đang chờ lượt AUTO BLOCK.':'Chờ xác nhận BLOCK.');
+    state.processingStatus[key]=reason;
+  }
+}
+async function executeAutoBlock(state,f,phone) {
+  await waitForFreeSwitch(state,f.group);
+  const now=Date.now(),profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+  const tabs=await chrome.tabs.query({url:'http://10.10.101.67:5003/*'});
+  Detection.applySchedule(state,Date.now());
+  if(Detection.pausedFor(state,f.group)){f.actionError='Nhóm này đang nghỉ theo lịch; không BLOCK.';return false;}
+  state.rotationBarriers=Detection.rotationBarriers(await rotationFeature());
+  if(!Detection.groupActionGate(state,f,Date.now()).ready||!Detection.backupReady(state,f,Date.now())||rotationHeld(state,await rotationFeature(),f)||!Detection.isFsActive(state,f,Date.now())||!Detection.backupTargetValid(state,f,Date.now())||!state.monitoringEnabled||!state.autoEnabled||f.state!=='SUSPECTED'||!f.incident||
+    f.incident.locked||f.incident.autoExecuted||f.incident.cancelled||!f.activeBeforeIncident||
+    Date.now()-f.updatedAt>state.config.staleMs||f.recentMedian>f.baseline*state.config.suspectRatio){
+    f.actionError='Sự cố đã thay đổi hoặc dữ liệu đã cũ; không BLOCK.';return false;
+  }
+  if(tabs.length!==1||!tabs[0].id){
+    f.actionError=`Expected exactly 1 FreeSWITCH tab; found ${tabs.length}`;
+    Detection.event(state,'AUTO_FAILED',f,now,f.actionError);return false;
+  }
+  // Save the lock before sending the single status change, including failures.
+  Object.assign(f.incident,{locked:true,actionCount:1,requestedAt:now,switchedAt:null,oldPhone:phone,actionPending:true});
+  f.switchedAt=null;f.actionError=null;
+  f.detectionNote='Đang chuyển ACTIVE → BLOCKED; chưa xác nhận hoàn tất';
+  Detection.refreshAlerts(state,now);
+  await saveState(state);
+  try{
+    const r=await sendFreeSwitchStatus(state,tabs[0].id,{type:'AUTO_BLOCK_FS',fs:f.fs,profile,phone},state.autoBlockMode==='AUTOMATIC');
+    f.incident.actionPending=false;
+    if(r?.ok){f.incident.autoExecuted=true;f.incident.actionUncertain=false;
+      f.incident.switchedAt=Date.now();f.switchedAt=f.incident.switchedAt;
+      f.autoValidationFailures=0;f.autoRetryAfter=null;
+      Detection.transition(state,f,'COOLDOWN',Date.now(),'FreeSWITCH confirmed BLOCKED; cooldown started');
+      Detection.event(state,'AUTO_BLOCKED',f,Date.now(),`${phone} ACTIVE → BLOCKED`);
+      Detection.recordGroupAction(state,f,Date.now());
+    }else if(r?.attempted===false){
+      // The page explicitly rejected validation BEFORE dispatching change.
+      // No phone was changed; do not trap the FS in a recovery lock.
+      Object.assign(f.incident,{locked:false,actionCount:0,switchedAt:null,actionUncertain:false});
+      f.switchedAt=null;f.actionError=r.error||'FreeSWITCH từ chối trước khi đổi trạng thái';
+      f.autoValidationFailures=(f.autoValidationFailures||0)+1;
+      f.autoRetryAfter=Date.now()+state.config.autoValidationRetryMs;
+      Detection.transition(state,f,'SUSPECTED',Date.now(),'No status change attempted; waiting to revalidate');
+      Detection.event(state,'AUTO_FAILED',f,Date.now(),`${r.errorCode||'VALIDATION'}: ${f.actionError}`);
+      Detection.refreshAlerts(state,Date.now());
+    }else{f.incident.actionUncertain=true;f.actionError=r?.error||'Status change result unknown';
+      Detection.event(state,'AUTO_FAILED',f,Date.now(),f.actionError);}
+  }catch(e){f.incident.actionPending=false;f.incident.actionUncertain=true;f.actionError=String(e);
+    Detection.event(state,'AUTO_FAILED',f,Date.now(),f.actionError);}
+  Detection.refreshAlerts(state,Date.now());
+  await saveState(state);
+  return !!f.incident.autoExecuted;
+}
+async function autoBlockNewAlerts(state) {
+  let feature=await rotationFeature();
+  if(typeof FsSwitch!=='undefined'&&typeof processSwitch==='function'&&feature.enabled&&feature.mode==='AUTOMATIC'&&FsSwitch.plans(state,feature,Date.now()).length){
+    const plans=FsSwitch.plans(state,feature,Date.now());
+    await saveState(state);
+    try{await processSwitch({type:'FS_SWITCH_TICK'});}
+    catch(error){
+      // A missing tab or a preflight failure must not abort other FS actions.
+      const first=plans[0];
+      const f=Object.values(state.fsStates).find(x=>x.group===first?.group&&x.fs===first?.source.fs);
+      if(f){f.rotationError=String(error.message||error);await saveState(state);}
+    }
+    Object.assign(state,await getState());feature=await rotationFeature();
+  }
+  const now=Date.now();
+  Detection.applySchedule(state,now);
+  state.pendingAutoActions=(state.pendingAutoActions||[]).filter(a=>{
+    const f=state.fsStates[a.key];
+    return !!f&&Detection.groupActionGate(state,f,Date.now()).ready&&Detection.backupReady(state,f,now)&&!rotationHeld(state,feature,f)&&Detection.isFsActive(state,f,now)&&Detection.backupTargetValid(state,f,now)&&!Detection.pausedFor(state,a.group)&&state.monitoringEnabled&&state.autoEnabled&&f?.state==='SUSPECTED'&&
+      f.incident?.id===a.incidentId&&!f.incident.locked&&!f.incident.cancelled&&
+      now-f.updatedAt<=state.config.staleMs&&now-state.freeswitch.updatedAt<=state.config.staleMs&&
+      f.recentMedian<=f.baseline*state.config.suspectRatio&&
+      (state.freeswitch.numbers||[]).filter(n=>n.fs===a.fs&&n.profile===a.profile&&n.status==='ACTIVE').length===1&&
+      (state.freeswitch.numbers||[]).some(n=>n.fs===a.fs&&n.profile===a.profile&&n.status==='ACTIVE'&&n.phone===a.phone);
+  });
+  if(!state.monitoringEnabled||!state.autoEnabled){processingStatus(state,feature);return state;}
+  const ordered=[...(state.alerts||[])].sort((a,b)=>{
+    if(a.group!==b.group)return a.group.localeCompare(b.group);
+    const ranked=Detection.groupCandidates(state,a.group,Date.now()).map(f=>f.key);
+    const rank=x=>{const i=ranked.indexOf(keyOf(x));return i<0?Infinity:i;};return rank(a)-rank(b);
+  });
+  for(const a of ordered){
+    const f=state.fsStates[keyOf(a)],profile=a.group==='99.153'?'COLLECTION':'TELESALE';
+    if(!f||!Detection.groupActionGate(state,f,Date.now()).ready||!Detection.backupReady(state,f,now)||rotationHeld(state,feature,f)||!Detection.isFsActive(state,f,now)||!Detection.backupTargetValid(state,f,now)||Detection.pausedFor(state,a.group)||!f?.incident||f.state!=='SUSPECTED'||!f.activeBeforeIncident||
+      f.incident.cancelled||f.incident.locked||f.incident.autoExecuted||
+      now-f.updatedAt>state.config.staleMs||f.recentMedian>f.baseline*state.config.suspectRatio)continue;
+    const matches=(state.freeswitch.numbers||[]).filter(n=>n.fs===a.fs&&n.profile===profile&&n.status==='ACTIVE');
+    if(matches.length!==1||!matches[0].hasStatusControl||!state.freeswitch.updatedAt||now-state.freeswitch.updatedAt>state.config.staleMs){
+      f.actionError=`Expected one fresh ACTIVE ${profile} row with status control; found ${matches.length}`;
+      Detection.event(state,'AUTO_FAILED',f,now,f.actionError);continue;
+    }
+    if(f.incident.oldPhone&&f.incident.oldPhone!==matches[0].phone){
+      f.actionError='ACTIVE phone changed; waiting for updated configuration';continue;
+    }
+    if(!f.autoValidationFailures)f.actionError=null;
+    if(state.autoBlockMode==='AUTOMATIC'){
+      state.pendingAutoActions=state.pendingAutoActions.filter(x=>x.key!==f.key);
+      if(Date.now()<(f.autoRetryAfter||0)||(f.autoValidationFailures||0)>=state.config.maxAutoValidationRetries)continue;
+      if(Date.now()<nextFreeSwitchAt(state,f.group)&&state.lastFreeSwitchAction?.group===f.group){
+        f.autoQueueUntil=nextFreeSwitchAt(state,f.group);continue;
+      }
+      f.autoQueueUntil=null;
+      await executeAutoBlock(state,f,matches[0].phone);
+      continue;
+    }
+    if(!state.pendingAutoActions.some(x=>x.key===f.key&&x.incidentId===f.incident.id)){
+      state.pendingAutoActions.push({...a,key:f.key,profile,phone:matches[0].phone,createdAt:now});
+      Detection.event(state,'AUTO_PREVIEW',f,now,'Waiting for user confirmation: ACTIVE → BLOCKED');
+    }
+  }
+  processingStatus(state,feature);
+  return state;
+}
+
+let messageQueue=Promise.resolve();
+chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
+  if(msg.type?.startsWith('FS_SWITCH_'))return;
+  if(msg.type==='GET_STATE'&&statusWriteInProgress){
+    // Read only: expose the persisted SUSPECTED / pending lock while the page
+    // is responding, without racing writes or marking the action completed.
+    getState().then(state=>sendResponse({ok:true,state})).catch(error=>sendResponse({ok:false,error:String(error)}));
+    return true;
+  }
+  messageQueue=messageQueue.then(async()=>{
+    let state=await getState();
+    const previousSchedule=JSON.stringify(state.schedule);
+    Detection.applySchedule(state,Date.now());
+
+    if(msg.type==="GET_STATE"){
+      state.pendingAutoActions=(state.pendingAutoActions||[]).filter(a=>{
+        const f=state.fsStates[a.key];
+        return f&&f.state==='SUSPECTED'&&f.incident?.id===a.incidentId&&!f.incident.locked&&
+          Detection.groupActionGate(state,f,Date.now()).ready;
+      });
+      Detection.refreshAlerts(state,Date.now());
+      processingStatus(state,await rotationFeature());
+      await saveState(state);
+      sendResponse({ok:true,state});
+      return;
+    }
+
+    if(msg.type==='PREVIEW_TEST_BLOCK_FS01'||msg.type==='CONFIRM_TEST_BLOCK_FS01'){
+      if(msg.type==='CONFIRM_TEST_BLOCK_FS01')await waitForFreeSwitch(state);
+      const now=Date.now(),fs='FS01',profile='COLLECTION';
+      const rows=(state.freeswitch.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
+      const node=Object.values(state.fsStates||{}).find(f=>f.group==='99.153'&&f.fs===fs);
+      const valid=rows.length===1&&rows[0].hasStatusControl&&state.freeswitch.updatedAt&&
+        now-state.freeswitch.updatedAt<=state.config.staleMs;
+      if(!valid||node?.currentVt>0){
+        sendResponse({ok:false,error:node?.currentVt>0?'FS01 đang có VT > 0, không thực hiện test.':'Cần đúng một số ACTIVE FS01 / COLLECTION và dữ liệu FreeSWITCH mới. Refresh tab FreeSWITCH.'});return;
+      }
+      if(msg.type==='PREVIEW_TEST_BLOCK_FS01'){
+        state.testBlockSequence=(state.testBlockSequence||0)+1;
+        state.testBlockPreview={id:`FS01-test-${now}-${state.testBlockSequence}`,phone:rows[0].phone,createdAt:now};
+        await saveState(state);sendResponse({ok:true,preview:{...state.testBlockPreview,fs,profile,currentVt:node?.currentVt??null}});return;
+      }
+      const preview=state.testBlockPreview;
+      if(!preview||preview.id!==msg.testId||preview.phone!==msg.phone||rows[0].phone!==msg.phone||now-preview.createdAt>60000){
+        sendResponse({ok:false,error:'Yêu cầu test đã cũ hoặc số ACTIVE thay đổi. Bấm Test BLOCK FS01 để kiểm tra lại.'});return;
+      }
+      const tabs=await chrome.tabs.query({url:'http://10.10.101.67:5003/*'});
+      if(tabs.length!==1||!tabs[0].id){sendResponse({ok:false,error:'Cần mở đúng một tab FreeSWITCH.'});return;}
+      state.testBlockPreview=null;
+      state.lastTestBlock={...preview,at:now,pending:true};
+      await saveState(state);
+      let result;
+      try{result=await sendFreeSwitchStatus(state,tabs[0].id,{type:'AUTO_BLOCK_FS',fs,profile,phone:msg.phone});}
+      catch(error){result={ok:false,error:String(error)};}
+      state.lastTestBlock.pending=false;state.lastTestBlock.ok=!!result?.ok;
+      state.lastTestBlock.error=result?.error;
+      state.events.unshift({type:result?.ok?'TEST_BLOCKED':'TEST_BLOCK_FAILED',at:Date.now(),group:'99.153',fs,
+        detail:`TEST FS01: ${msg.phone} ACTIVE → BLOCKED${result?.error?' · '+result.error:''}`});
+      state.events=(state.events||[]).filter(e=>e.at>Date.now()-3*86400000);
+      await saveState(state);sendResponse({ok:!!result?.ok,error:result?.error||(!result?.ok?'Không xác minh được trạng thái; kiểm tra FreeSWITCH.':null)});return;
+    }
+
+    if(msg.type==='SET_AUTO_BLOCK_MODE'){
+      if(!['MANUAL','AUTOMATIC'].includes(msg.mode)){
+        sendResponse({ok:false,error:'Chế độ AUTO BLOCK không hợp lệ.'});return;
+      }
+      state.autoBlockMode=msg.mode;
+      if(msg.mode==='AUTOMATIC')state.pendingAutoActions=[];
+      state.events.unshift({type:'AUTO_MODE_CHANGED',at:Date.now(),detail:msg.mode});
+      state.events=(state.events||[]).filter(e=>e.at>Date.now()-3*86400000);
+      classify(state);await autoBlockNewAlerts(state);
+      await saveState(state);sendResponse({ok:true,state});return;
+    }
+
+    if(msg.type==="SET_AUTO"){
+      state.autoEnabled=!!msg.enabled;
+      state.events.unshift({type:state.autoEnabled?"AUTO_ON":"AUTO_OFF",at:Date.now()});
+      state.events=(state.events||[]).filter(e=>e.at>Date.now()-3*86400000);
+      state=classify(state);state=await autoBlockNewAlerts(state);
+      await saveState(state);
+      sendResponse({ok:true,state});
+      return;
+    }
+
+    if(msg.type==='RECHECK_AUTO_BLOCK'){
+      const f=state.fsStates[msg.key];
+      if(!f||f.state!=='SUSPECTED'||f.incident?.id!==msg.incidentId||f.incident.locked||!f.autoValidationFailures){
+        sendResponse({ok:false,error:'Sự cố đã thay đổi hoặc kết quả thao tác chưa rõ; kiểm tra FreeSWITCH.'});return;
+      }
+      f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+      classify(state);await autoBlockNewAlerts(state);await saveState(state);
+      sendResponse({ok:!f.actionError,error:f.actionError,state});return;
+    }
+    if(msg.type==='ACK_MANUAL_AFTER_FAILURE'){
+      const f=state.fsStates[msg.key];
+      if(!f||f.incident?.id!==msg.incidentId||!f.incident.locked||!f.incident.actionUncertain){
+        sendResponse({ok:false,error:'Sự cố không còn chờ kiểm tra tay.'});return;
+      }
+      f.incident.manualExecuted=true;f.incident.actionUncertain=false;f.incident.switchedAt=Date.now();
+      f.incident.stableSince=null;f.switchedAt=f.incident.switchedAt;f.history=[];f.actionError=null;
+      Detection.transition(state,f,'COOLDOWN',Date.now(),'User confirmed manual handling after uncertain result');
+      Detection.event(state,'MANUAL_SWITCH',f,Date.now(),'User confirmed manual handling; recovery lock retained');
+      await saveState(state);sendResponse({ok:true,state});return;
+    }
+
+    if(msg.type==='REPORT_MANUAL_SWAP'){
+      const f=state.fsStates[msg.key];
+      if(!f||f.incident?.id!==msg.incidentId||!Detection.recordManualSwap(state,f,Date.now(),'User reported manual swap; incident locked')){
+        sendResponse({ok:false,error:'Incident changed or already locked.'});return;
+      }
+      await saveState(state);sendResponse({ok:true,state});return;
+    }
+    if(msg.type==='CANCEL_AUTO_BLOCK'){
+      const f=state.fsStates[msg.key];
+      if(f?.incident?.id===msg.incidentId&&!f.incident.locked){
+        f.incident.cancelled=true;Detection.event(state,'AUTO_CANCELLED',f,Date.now());
+      }
+      state.pendingAutoActions=state.pendingAutoActions.filter(a=>a.key!==msg.key||a.incidentId!==msg.incidentId);
+      await saveState(state);sendResponse({ok:true,state});return;
+    }
+    if(msg.type==='CONFIRM_AUTO_BLOCK'){
+      classify(state);await autoBlockNewAlerts(state);
+      const action=state.pendingAutoActions.find(a=>a.key===msg.key&&a.incidentId===msg.incidentId);
+      const f=action&&state.fsStates[action.key];
+      if(!action||!msg.phone||action.phone!==msg.phone||!f?.activeBeforeIncident||action.group!==f.group||action.fs!==f.fs||
+        action.profile!==(f.group==='99.153'?'COLLECTION':'TELESALE')){
+        await saveState(state);sendResponse({ok:false,error:'Sự cố hoặc số ACTIVE đã thay đổi, dữ liệu cũ hoặc AUTO đã tắt. Vui lòng kiểm tra lại.'});return;
+      }
+      state.pendingAutoActions=state.pendingAutoActions.filter(a=>a!==action);
+      const ok=await executeAutoBlock(state,f,action.phone);
+      // Clear queued peer confirmations immediately, before a dashboard read
+      // or another OpenSIPS sample. The group observation starts on success.
+      state.pendingAutoActions=state.pendingAutoActions.filter(a=>{
+        const peer=state.fsStates[a.key];
+        return peer&&!peer.incident?.locked&&Detection.groupActionGate(state,peer,Date.now()).ready;
+      });
+      await saveState(state);sendResponse({ok,error:ok?null:f.actionError,state});return;
+    }
+
+    if(msg.type==="SET_MONITORING"){
+      state.monitoringEnabled=!!msg.enabled;
+      if(!state.monitoringEnabled){state.alerts=[];state.pendingAutoActions=[];}
+      state.events.unshift({
+        type:state.monitoringEnabled?"MONITORING_ON":"MONITORING_OFF",
+        at:Date.now()
+      });
+      state.events=(state.events||[]).filter(e=>e.at>Date.now()-3*86400000);
+      await saveState(state);
+      await broadcastMonitoring(state.monitoringEnabled);
+      sendResponse({ok:true,state});
+      return;
+    }
+
+    if(msg.type==="GRAFANA_SAMPLE"){
+      for(const [group,value] of Object.entries(msg.values||{})){
+        if(!state.grafana[group]) continue;
+        Detection.grafana(state,group,Number(value),Date.now());
+      }
+    }
+
+    if(msg.type==="OPENSIPS_SAMPLE"){
+      const group=msg.group;
+      if(state.opensips[group] && msg.diagnostic?.tableFound && msg.diagnostic?.httpStatus===200){
+        const old=state.opensips[group].nodes||[];
+        state.opensips[group].nodes=(msg.nodes||[]).map(n=>{
+          const prev=old.find(x=>x.ip===n.ip&&x.resource===n.resource);
+          const history=[...(prev?.history||[]),n.used].slice(-120);
+          return {...n,history};
+        });
+        state.opensips[group].updatedAt=Date.now();
+        state.opensips[group].diagnostic=msg.diagnostic||null;
+        for(const n of state.opensips[group].nodes){
+          const reserved=`${group}|${n.fs}`;
+          if(n.groupId===0&&state.fsTestExclusions?.[reserved]?.releaseAfterOff)delete state.fsTestExclusions[reserved];
+        }
+        Detection.sample(state,group,state.opensips[group].nodes,Date.now());
+      } else if(state.opensips[group]){
+        state.opensips[group].diagnostic=msg.diagnostic||null;
+      }
+    }
+
+    if(msg.type==="FREESWITCH_SAMPLE"){
+      const previous=state.freeswitch.numbers||[];
+      state.freeswitch={...msg.data,updatedAt:Date.now()};
+      Detection.observeManualSwaps(state,state.freeswitch.numbers||[],Date.now(),previous);
+    }
+
+    if(msg.type==="CLEAR_HISTORY"){
+      const {date,startTime,endTime}=msg;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date||'')||![startTime,endTime].every(t=>/^([01]\d|2[0-3]):[0-5]\d$/.test(t||''))){
+        sendResponse({ok:false,error:'Chọn ngày và khung giờ hợp lệ để xóa log.'});return;
+      }
+      const start=Date.parse(`${date}T${startTime}:00+07:00`),end=Date.parse(`${date}T${endTime}:00+07:00`)+60000;
+      if(!Number.isFinite(start)||new Date(start+7*3600000).toISOString().slice(0,10)!==date||end<=start){
+        sendResponse({ok:false,error:'Ngày không hợp lệ hoặc giờ kết thúc phải từ giờ bắt đầu trở đi.'});return;
+      }
+      const count=state.events.length;
+      state.events=state.events.filter(e=>!(e.at>=start&&e.at<end));
+      await saveState(state);sendResponse({ok:true,deleted:count-state.events.length,state});return;
+    }
+
+    // Recompute alerts after applying the newest sample.
+    state=classify(state);
+    state=await autoBlockNewAlerts(state);
+    await saveState(state);
+    sendResponse({ok:true,state});
+  }).catch(e=>sendResponse({ok:false,error:String(e)}));
+  return true;
+});
+
+// Open/focus the dashboard as a normal Chrome tab.
+chrome.action.onClicked.addListener(async()=>{
+  const url=chrome.runtime.getURL("dashboard.html");
+  const tabs=await chrome.tabs.query({url});
+  if(tabs.length){await chrome.tabs.update(tabs[0].id,{active:true});await chrome.windows.update(tabs[0].windowId,{focused:true});}
+  else await chrome.tabs.create({url});
+});
+
+// Extension alarms wake the worker even when source tabs are inactive.
+const OPENSIPS_ALARM='opensips-reload';
+async function ensureOpenSipsAlarm(){
+  if(!await chrome.alarms.get(OPENSIPS_ALARM))
+    await chrome.alarms.create(OPENSIPS_ALARM,{periodInMinutes:0.5});
+}
+chrome.alarms.onAlarm.addListener(alarm=>{
+  if(alarm.name!==OPENSIPS_ALARM)return;
+  (async()=>{
+    const separate=await chrome.storage.local.get('fsSwitch');
+    if(separate.fsSwitch?.operation?.status==='RUNNING'||separate.fsSwitch?.lastTest?.status==='RUNNING')return;
+    const tabs=await chrome.tabs.query({url:['http://10.10.99.153/*','http://10.10.99.155/*']});
+    await Promise.allSettled(tabs.filter(t=>t.id!=null&&!t.active&&t.status!=='loading').map(t=>chrome.tabs.reload(t.id)));
+  })().catch(()=>{});
+});
+chrome.runtime.onInstalled.addListener(()=>{ensureOpenSipsAlarm().catch(()=>{});});
+chrome.runtime.onStartup.addListener(()=>{ensureOpenSipsAlarm().catch(()=>{});});
+ensureOpenSipsAlarm().catch(()=>{});
+
+importScripts("fs-switch-worker.js");

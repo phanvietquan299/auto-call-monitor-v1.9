@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Call Monitor V1.9",
+  "version": "1.11.22",
+  "description": "Persistent monitor dashboard for Grafana/OpenSIPS VT with manual monitoring toggle and event log.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "notifications",
+    "windows",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://10.10.101.126:3000/*",
+    "http://10.10.99.153/*",
+    "http://10.10.99.155/*",
+    "http://10.10.101.67:5003/*"
+  ],
+  "action": {
+    "default_title": "Open Auto Call Monitor Dashboard"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://10.10.101.126:3000/*"
+      ],
+      "js": [
+        "grafana.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://10.10.99.153/*",
+        "http://10.10.99.155/*"
+      ],
+      "js": [
+        "opensips.js",
+        "fs-switch-opensips.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://10.10.101.67:5003/*"
+      ],
+      "js": [
+        "freeswitch.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "minimum_chrome_version": "120"
+}
