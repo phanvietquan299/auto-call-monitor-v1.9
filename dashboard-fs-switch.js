@@ -12,6 +12,7 @@
       el('fs-switch-open').className=f.enabled?'on':'off';
       if(!el('fs-switch-automatic').open)el('fs-switch-mode').value=f.mode;
       renderNodes();
+      renderPresetOptions();
       if(!thresholdDirty&&document.activeElement!==el("fs-backup-threshold"))el("fs-backup-threshold").value=snapshot.threshold??10;
       for(const group of Object.keys(FsSwitch.groups)){const key=group.replace(".","-"),p=f.nextSwitch?.[group];el("preset-status-"+key).textContent=p?`Đã đặt: ${p.source?'Tắt '+p.source:''}${p.source&&p.target?' · ':''}${p.target?'Bật '+p.target:''}`:"Tự chọn theo BACKUP";}
       el('fs-switch-status').textContent=f.operation?`${f.operation.plan.source.fs} → ${f.operation.plan.target.fs}: ${f.operation.status==='DONE'?'Đã chuyển':f.operation.status==='RUNNING'?'Đang chuyển':f.operation.status==='FAILED'?'Cần kiểm tra':'Đã xử lý'}`:'';
@@ -19,6 +20,25 @@
       el('fs-switch-release').hidden=f.enabled||!['FAILED','DONE'].includes(f.operation?.status);
       el('fs-switch-plans').innerHTML=snapshot.candidates.map((p,i)=>`<p>${p.action==='ENABLE'?'Bật '+escape(p.target.fs):p.action==='DISABLE'?'Tắt '+escape(p.source.fs):escape(p.source.fs)+' → '+escape(p.target.fs)} · ${escape(p.profile)} · BACKUP ${p.source.backups} → ${p.target.backups} <button data-switch-plan="${i}" ${!f.enabled||f.mode!=='MANUAL'?'disabled':''}>Xác nhận chuyển</button></p>`).join('')||'';
     }catch(e){el('fs-switch-status').textContent=e.message;}
+  }
+  function renderPresetOptions(){
+    const now=Date.now();
+    for(const [group,policy] of Object.entries(FsSwitch.groups)){
+      const data=snapshot.nodes?.[group],age=now-(data?.updatedAt||0);
+      const fresh=Number.isFinite(age)&&age>=0&&age<45000;
+      for(const [kind,groupId] of [['source',policy.groupId],['target',0]]){
+        const select=el(`preset-${kind}-${group.replace('.','-')}`),previous=select.value;
+        const allowed=fresh?policy.fs.filter(fs=>{
+          const rows=(data.nodes||[]).filter(n=>n.fs===fs);
+          return rows.length===1&&rows[0].groupId===groupId;
+        }):[];
+        const html='<option value="">—</option>'+allowed.map(fs=>`<option value="${fs}">${fs}</option>`).join('');
+        if(select.innerHTML!==html){
+          select.innerHTML=html;
+          select.value=allowed.includes(previous)?previous:'';
+        }
+      }
+    }
   }
   function renderNodes(){
     const html=Object.entries(FsSwitch.groups).map(([group,policy])=>`<div class="fs-node-group"><strong>${group==='99.153'?'Collection':'Sale'}</strong>${policy.fs.map(fs=>{
