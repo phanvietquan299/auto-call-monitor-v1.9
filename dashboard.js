@@ -112,6 +112,7 @@ function patchChildren(target,source){
       for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
       for(const attr of [...next.attributes])if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
       patchChildren(current,next);
+      if(current.nodeName==='SELECT'&&current.hasAttribute('data-phone-status')&&!manualStatusBusy.has(current.dataset.fs))current.value=next.value;
     }else if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;
   }
   while(target.childNodes.length>wanted.length)target.removeChild(target.lastChild);
