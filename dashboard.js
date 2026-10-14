@@ -3,6 +3,27 @@ async function getState(){
   return r?.state||null;
 }
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const manualStatusBusy=new Set();
+function manualStatusControl(s,fs,profile){
+ const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
+ const fresh=Date.now()-(s.freeswitch?.updatedAt||0)<45000;
+ if(rows.length!==1||!fresh)return '<div class="fs-phone-status muted">Chờ số ACTIVE</div>';
+ const row=rows[0],busy=manualStatusBusy.has(fs);
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:'🟢',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
+}
+document.querySelector('#groups').addEventListener('change',async event=>{
+ const select=event.target.closest('[data-phone-status]');if(!select)return;
+ const {fs,phone,expected}=select.dataset,status=select.value;
+ if(status===expected||manualStatusBusy.has(fs))return;
+ manualStatusBusy.add(fs);select.disabled=true;
+ confirmationNotice(`${fs}: đang đổi ${expected} → ${status}…`);
+ try{
+  const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs,phone,expectedStatus:expected,status});
+  if(!result?.ok)throw Error(result?.error||'Không xác minh được trạng thái.');
+  confirmationNotice(`${fs}: đã đổi ${phone} → ${status}`);
+ }catch(error){select.value=expected;confirmationNotice(error.message);}
+ finally{manualStatusBusy.delete(fs);select.disabled=false;render().catch(()=>{});}
+});
 const dismissedCdrWarnings=new Set();
 const cdrWarningKey=w=>`${w.group}|${w.fs}|${w.pattern}|${w.at}`;
 document.querySelector('#summary').onclick=event=>{
@@ -262,7 +283,7 @@ async function render(){
       const backupProfile=g==='99.153'?'COLLECTION':'TELESALE';
       const cachedBackup=s.freeswitch?.backupCounts?.[n.fs];
       const backupCount=cachedBackup?.count??(s.freeswitch?.numbers? s.freeswitch.numbers.filter(row=>row.fs===n.fs&&row.profile===backupProfile&&row.status==='BACKUP').length:null);
-      groups+=`<tr><td data-label="FS">${esc(n.fs||"?")} (${backupCount??'—'})</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
+      groups+=`<tr><td data-label="FS">${esc(n.fs||"?")} (${backupCount??'—'})${manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
     }
     groups+="</table></div></div>";
   }
