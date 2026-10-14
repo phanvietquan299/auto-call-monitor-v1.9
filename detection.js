@@ -1,14 +1,14 @@
 /* Shared by the extension worker and the deterministic Node simulations. */
 (function(root){
   const CONFIG={sampleIntervalMs:1000,opensipsReloadMs:30000,baselineSamples:20,recentSamples:5,historySamples:120,
-    groupObserveMs:9000,activeVtMin:10,watchRatio:0.70,warningRatio:0.50,suspectRatio:0.35,
+    cdrObservationEnabled:true,cdrVerificationEnabled:false,groupObserveMs:9000,activeVtMin:10,watchRatio:0.70,warningRatio:0.50,suspectRatio:0.35,
     healthyRatio:0.85,grafanaBaselineSamples:20,grafanaRecentSamples:3,
     staleMs:45000,sampleGapMs:75000,maxCollapseMs:120000,minLowSamples:3,suspectWindows:3,
-    freeSwitchActionGapMs:5000,freeSwitchAutomaticGapMs:5000,autoValidationRetryMs:15000,maxAutoValidationRetries:3,autoCooldownMs:180000,recoverySamples:12,recoveryMinVt:10,
+    freeSwitchActionGapMs:3000,freeSwitchAutomaticGapMs:3000,autoValidationRetryMs:15000,maxAutoValidationRetries:3,autoCooldownMs:180000,recoverySamples:12,recoveryMinVt:10,
     collectionRecoveryTrafficFloor:11,collectionCooldownMs:30000,collectionRecoverySamples:8,collectionRecoveryStableMs:10000,
     saleCooldownMs:30000,saleRecoverySamples:8,saleRecoveryStableMs:20000,
     saleRecoveryMinVt:0,saleRecoveryTrafficFloor:4,saleRecoveryRangeFloor:2,
-    recoveryRangeRatio:0.35,recoveryTrafficFloor:50,recoveryStableMs:60000,recoveryDelayedMs:300000,backupBlockWaitMs:15000,rotationBackupGraceMs:30000,slowBaselineStableMs:60000,
+    recoveryRangeRatio:0.35,recoveryTrafficFloor:50,recoveryStableMs:60000,recoveryDelayedMs:300000,backupBlockWaitMs:5000,rotationBackupGraceMs:30000,slowBaselineStableMs:60000,
     workdayStartMinute:540,collectionDayEndMinute:1080,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
   const median=values=>{const a=values.filter(Number.isFinite).slice().sort((a,b)=>a-b);const i=Math.floor(a.length/2);return a.length?(a.length%2?a[i]:(a[i-1]+a[i])/2):null;};
   const keyOf=a=>`${a.group}|${a.fs}|${a.ip}`;
@@ -85,7 +85,7 @@
       const group=op.plan?.group||op.group;
       if(!group||!['RUNNING','FAILED','DONE','ACKNOWLEDGED'].includes(op.status))continue;
       if(result[group]&&(result[group].startedAt||0)>=(op.startedAt||0))continue;
-      result[group]={startedAt:op.startedAt,status:op.status,
+      result[group]={startedAt:op.startedAt,status:op.status,routingVerified:op.status==='DONE'&&op.stage==='ROUTING_VERIFIED',
         finishedAt:op.status==='ACKNOWLEDGED'?op.acknowledgedAt:op.finishedAt};
     }
     return result;
@@ -100,6 +100,7 @@
   }
   function backupReady(s,f,now){
     if(!f.incident?.isBackup)return true;
+    if(cdrPrimary(s)){const b=s.rotationBarriers?.[f.group];return !b||b.routingVerified||!['RUNNING','FAILED'].includes(b.status)&&now>=(b.finishedAt||0)+(s.config.rotationBackupGraceMs??30000);}
     const a=backupAssessment(s,f,now);
     if(a.waiting)return false;
     if(!a.after)return true;
@@ -140,10 +141,146 @@
     return early>0&&late-early>=Math.max(2,early*0.05)&&v.at(-1)>=late&&
       median(v.slice(-2))>=median(v.slice(-4,-2))*0.95;
   }
+  const cdrPrimary=s=>s.config?.detectionSource==='CDR';
+  function cdrVtDrop(s,f,now){
+    return !s.config?.cdrRequireVtDrop||(Number.isFinite(f.baseline)&&f.baseline>0&&Number.isFinite(f.currentVt)&&
+      now-f.updatedAt>=0&&now-f.updatedAt<=s.config.staleMs&&f.currentVt<=f.baseline*s.config.suspectRatio);
+  }
+  function activationBlockReady(s,f,now){
+    const at=f.activatedAt,initial=f.activationInitialVt,e=f.cdr?.decision;
+    if(!s.config?.cdrRequireVtDrop||!at||(f.lastIncident?.switchedAt||f.incident?.switchedAt||0)>=at||now-at<0||now-at>120000||!Number.isFinite(initial)||
+      !Number.isFinite(f.currentVt)||now-f.updatedAt<0||now-f.updatedAt>s.config.staleMs||!e?.locked||e.error||
+      e.checkedAt<at||e.newestCallTime<=at)return false;
+    const points=(f.history||[]).filter(x=>x.time>=at+1000);
+    return points.length>=1&&f.currentVt<=initial&&median(points.slice(-3).map(x=>x.vt))<=initial;
+  }
+  function hybridVtReady(s,f,now){
+    return cdrVtDrop(s,f,now)||activationBlockReady(s,f,now)||!!(f.incident?.isBackup&&f.incident.noVtGrowth&&
+      Number.isFinite(f.currentVt)&&f.currentVt<=f.incident.vtAtSwap&&now-f.updatedAt<=s.config.staleMs);
+  }
+  function relearnHybridBaseline(s,f,now){
+    const c=s.config,e=f.cdr?.decision;
+    f.baselineRelearnNote=null;
+    if(!c.cdrRequireVtDrop||!f.baseline||!f.vtDeclineAt)return;
+    if(f.incident){f.baselineRelearnNote='Giữ baseline khi sự cố đang chờ xử lý/phục hồi';return;}
+    if(!e||e.error||!e.eligibleCount||now-e.checkedAt<0||now-e.checkedAt>15000){f.baselineRelearnNote='Chưa học lại: cần CDR mới đọc được';return;}
+    if(e.locked||pairedCdrProof(s,f,now)){f.baselineRelearnNote='Giữ baseline: CDR đang có bằng chứng 5/5';return;}
+    const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+    const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+    if(active.length!==1||active[0].phone!==e.phone){f.baselineRelearnNote='Chưa học lại: cần CDR đúng số ACTIVE';return;}
+    const wait=Math.max(0,c.maxCollapseMs-(now-f.vtDeclineAt));
+    if(now-f.vtDeclineAt<=c.maxCollapseMs){f.baselineRelearnNote=`Học lại mức thấp điểm sau ${Math.ceil(wait/1000)}s nếu VT ổn định và CDR không lỗi`;return;}
+    const points=f.history.filter(x=>x.time>=now-c.slowBaselineStableMs),values=points.map(x=>x.vt),m=median(values);
+    if(points.length<c.baselineSamples||points[0].time>now-c.slowBaselineStableMs+c.sampleIntervalMs){f.baselineRelearnNote='Chờ đủ cửa sổ VT ổn định 60s để học lại';return;}
+    if(Math.min(...values)<=c.activeVtMin){f.baselineRelearnNote='Giữ baseline: VT quá thấp, chưa xác nhận mức thấp điểm';return;}
+    if(Math.max(...values)-Math.min(...values)>m*c.recoveryRangeRatio){f.baselineRelearnNote='Chờ VT bớt dao động để học lại baseline';return;}
+    f.baseline=m;f.baselineVt=m;f.healthyHistory=values.slice(-c.baselineSamples);f.vtDeclineAt=null;f.vtDropAt=null;f.pairedCdrProof=null;
+    f.baselineRelearnNote='Đã học lại baseline theo mức VT thấp ổn định';
+    f.detectionNote='VT thấp ổn định và CDR không xác nhận block; đã học lại baseline thấp điểm';
+  }
+  function hybridObservationState(s,f,now,e){
+    if(!s.config?.cdrRequireVtDrop)return e?'HEALTHY':'WAITING_CDR';
+    if(!Number.isFinite(f.currentVt)||now-f.updatedAt<0||now-f.updatedAt>s.config.staleMs){f.detectionNote='Chờ VT mới; chưa đánh giá kết hợp';return 'WAITING_VT';}
+    if(!Number.isFinite(f.baseline)||f.baseline<=0){f.detectionNote='Đang học baseline VT trước khi đánh giá kết hợp';return 'LEARNING';}
+    const ratio=f.currentVt/f.baseline;
+    if(ratio<=s.config.warningRatio){f.detectionNote=e?'VT giảm mạnh; CDR chưa đủ 5/5 để kết luận nghi block':'VT giảm mạnh; chờ CDR mới để xác minh';return 'WARNING';}
+    if(e?.locked){f.detectionNote='CDR đã đủ 5/5 nhưng VT chưa tới ngưỡng; tiếp tục theo dõi';return 'WARNING';}
+    if(ratio<=s.config.watchRatio){f.detectionNote='VT đang giảm; theo dõi kết hợp CDR';return 'WATCHING';}
+    if(!e){f.detectionNote='VT chưa giảm mạnh; chờ CDR mới để xác minh';return 'WAITING_CDR';}
+    f.detectionNote=null;return 'HEALTHY';
+  }
+  function pairedCdrProof(s,f,now){
+    const e=f.pairedCdrProof;
+    if(!s.config?.cdrRequireVtDrop||!e||now-e.checkedAt<0||now-e.checkedAt>15000||e.checkedAt<(f.cdrEnabledAt||0)||e.newestCallTime<=(f.incident?.switchedAt||f.lastIncident?.switchedAt||0)||
+      !Number.isFinite(f.baseline)||f.currentVt>=f.baseline*s.config.healthyRatio||!isFsActive(s,f,now))return null;
+    const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+    const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+    return active.length===1&&active[0].phone===e.phone&&e.group===f.group&&e.ip===f.ip?e:null;
+  }
+  function manualCdrProof(s,f){
+    const i=f.incident,e=i?.manualCdrProof;
+    if(!s.config?.cdrRequireVtDrop||s.autoBlockMode!=='MANUAL'||!s.autoEnabled||!s.monitoringEnabled||!e||i.locked||i.cancelled||i.autoExecuted||i.manualExecuted)return null;
+    const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+    const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+    return e.incidentId===i.id&&e.group===f.group&&e.ip===f.ip&&active.length===1&&e.phone===active[0].phone?e:null;
+  }
+  function updateCdrStates(s,now){
+    if(!cdrPrimary(s))return;
+    for(const f of Object.values(s.fsStates||{})){
+      if(!isFsActive(s,f,now)||pausedFor(s,f.group)||!s.monitoringEnabled)continue;
+      if(f.incident?.actionPending||f.incident?.actionUncertain)continue;
+      let e=f.cdr?.decision;
+      const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+      const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+      const fresh=e&&!e.error&&now-e.checkedAt>=0&&now-e.checkedAt<=15000&&active.length===1&&e.phone===active[0].phone;
+      if(s.config.cdrRequireVtDrop){
+        if(!pairedCdrProof(s,f,now))f.pairedCdrProof=null;
+        if(fresh&&e.locked&&e.count===5&&f.vtDeclineAt&&e.checkedAt>=f.vtDeclineAt&&
+          f.currentVt<f.baseline*s.config.healthyRatio&&e.checkedAt>=(f.cdrEnabledAt||0))
+          f.pairedCdrProof={...e,callIds:[...(e.callIds||[])]};
+        e=pairedCdrProof(s,f,now)||e;
+      }
+      if(f.incident?.manualCdrProof&&!f.incident.locked&&!f.incident.cancelled){
+        if(manualCdrProof(s,f)){f.state='SUSPECTED';continue;}
+        f.lastIncident={...f.incident,closed:true,closedAt:now};f.incident=null;f.candidateId=null;
+      }
+      if((!fresh&&!pairedCdrProof(s,f,now))||!e.eligibleCount){if(!f.incident?.locked){f.state=hybridObservationState(s,f,now,null);if(f.incident)f.incident.cdrConfirmationReads=0;}continue;}
+      const handled=f.incident?.autoExecuted||f.incident?.manualExecuted;
+      if(handled){
+        const i=f.incident;
+        if(e.newestCallTime<=i.switchedAt){f.state='RECOVERING';continue;}
+        if(!e.locked&&s.config.cdrRequireVtDrop&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){f.state='RECOVERING';continue;}
+        if(!e.locked){f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.state='HEALTHY';if(s.config.cdrRequireVtDrop){f.baseline=null;f.baselineVt=null;f.healthyHistory=[];f.vtDropAt=null;}continue;}
+        f.state='RECOVERING';
+        if(i.isBackup||now-i.switchedAt<(s.config.backupBlockWaitMs??5000))continue;
+        if(s.config.cdrRequireVtDrop){
+          const values=(f.history||[]).filter(x=>x.time>i.switchedAt).slice(-3).map(x=>x.vt);
+          if(!Number.isFinite(i.vtAtSwap)||values.length<2||f.currentVt>i.vtAtSwap||median(values)>i.vtAtSwap)continue;
+        }
+        f.lastIncident=i;f.incident=null;
+        f.cdrBackup={noVtGrowth:true,vtAtSwap:i.vtAtSwap,previousPhone:i.oldPhone,attemptedPhones:[...(i.attemptedPhones||[]),i.oldPhone]};
+      }
+      const activation=activationBlockReady(s,f,now),backupNoGrowth=f.cdrBackup?.noVtGrowth;
+      if(e.locked&&(hybridVtReady(s,f,now)||backupNoGrowth)&&(!s.config.cdrRequireVtDrop||activation||backupNoGrowth||(pairedCdrProof(s,f,now)||e.checkedAt>=(f.vtDropAt||0)))){
+        if(f.incident?.cancelled&&f.incident.rejectedCdrCalls===e.callIds?.join('|')){f.state='WARNING';continue;}
+        if(!f.incident||f.incident.cancelled){
+          const backup=f.cdrBackup;
+          f.incident={id:`${f.group}-${f.fs}-cdr-${now}`,startedAt:now,oldPhone:e.phone,locked:false,autoExecuted:false,actionCount:0,
+            activationRecovery:activation,...(backup?{isBackup:true,noVtGrowth:backup.noVtGrowth,vtAtSwap:backup.vtAtSwap,previousPhone:backup.previousPhone,attemptedPhones:backup.attemptedPhones}:{})};
+          f.cdrBackup=null;f.candidateId=f.incident.id;f.startedAt=now;f.autoValidationFailures=0;f.autoRetryAfter=null;
+        }
+        const i=f.incident;
+        // Only a new Search response counts; dashboard/VT refreshes reuse checkedAt.
+        if(i.cdrLastConfirmationAt!==e.checkedAt){
+          i.cdrConfirmationReads=Math.min(2,(i.cdrConfirmationReads||0)+1);
+          i.cdrLastConfirmationAt=e.checkedAt;
+        }
+        e.incidentId=i.id;f.cdr.incidentId=i.id;f.activeBeforeIncident=true;f.state='SUSPECTED';f.detectionNote='VT đã tới ngưỡng và CDR đủ 5/5; nghi block được xác nhận bởi cả hai tín hiệu';
+        if(s.config.cdrRequireVtDrop&&s.autoBlockMode==='MANUAL'&&s.autoEnabled&&(now-e.checkedAt<=10000||pairedCdrProof(s,f,now)))i.manualCdrProof={...e,callIds:[...(e.callIds||[])]};
+      }else{
+        if(f.incident&&!f.incident.locked){f.lastIncident={...f.incident,cancelled:true,closed:true,closedAt:now};f.incident=null;f.candidateId=null;}
+        if(!f.incident?.locked)f.state=hybridObservationState(s,f,now,e);
+      }
+    }
+  }
+  function cdrGate(s,f,now){
+    if(!cdrPrimary(s)&&s.config?.cdrVerificationEnabled!==true)return {ready:true};
+    const held=cdrPrimary(s)?manualCdrProof(s,f):null;
+    const paired=cdrPrimary(s)?pairedCdrProof(s,f,now):null;
+    const e=held||paired||(cdrPrimary(s)?f.cdr?.decision:f.cdr),profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+    const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+    const confirmed=!cdrPrimary(s)||s.config?.cdrRequireVtDrop||(f.incident?.cdrConfirmationReads||0)>=2;
+    if(cdrPrimary(s)&&!held&&!hybridVtReady(s,f,now))return {ready:false,reason:'Chờ VT tụt theo baseline và CDR đủ 5/5'};
+    const ready=!!(confirmed&&(held||activationBlockReady(s,f,now)||f.incident?.noVtGrowth||!s.config?.cdrRequireVtDrop||(paired||e?.checkedAt>=(f.vtDropAt||0)))&&e?.locked&&!e.observation&&e.count===5&&e.incidentId===f.incident?.id&&e.group===f.group&&e.ip===f.ip&&
+      (held||paired||now-e.checkedAt>=0&&now-e.checkedAt<=10000)&&active.length===1&&e.phone===active[0].phone);
+    if(!confirmed)return {ready:false,reason:'SUSPECTED: chờ lượt đọc CDR kế tiếp vẫn đủ 5 cuộc liên tiếp'};
+    return {ready,reason:held&&ready?'Đã ghi nhận CDR 5/5; chờ bạn xác nhận khi VT vẫn thấp':ready?'CDR xác nhận 5 cuộc liên tiếp 480-0-0 / 480-1-0':f.cdrStatus||'Chờ CDR xác nhận 5 cuộc mới nhất liên tiếp 480-0-0 / 480-1-0'};
+  }
   function groupCandidates(s,group,now){
+    if(cdrPrimary(s))return groupMembers(s,group,now).filter(f=>f.state==='SUSPECTED'&&f.incident&&!f.incident.locked&&!f.incident.cancelled&&!f.incident.autoExecuted&&cdrGate(s,f,now).ready).sort((a,b)=>(s.config.cdrRequireVtDrop?a.currentVt-b.currentVt:0)||(b.cdr?.decision?.consecutiveTotal||0)-(a.cdr?.decision?.consecutiveTotal||0)||a.fs.localeCompare(b.fs));
     return groupMembers(s,group,now).filter(f=>f.state==='SUSPECTED'&&f.incident&&
       !f.rotationError&&!f.incident.isBackup&&!f.incident.locked&&!f.incident.cancelled&&!f.incident.autoExecuted&&
-      f.activeBeforeIncident&&f.currentVt<=f.baseline*s.config.suspectRatio&&f.recentMedian<=f.baseline*s.config.suspectRatio&&!preBlockRebounding(s,f)&&!groupRebounding(s,f,now))
+      cdrGate(s,f,now).ready&&f.activeBeforeIncident&&f.currentVt<=f.baseline*s.config.suspectRatio&&f.recentMedian<=f.baseline*s.config.suspectRatio&&!preBlockRebounding(s,f)&&!groupRebounding(s,f,now))
       .sort((a,b)=>{
         const falling=f=>{const v=(f.history||[]).slice(-6).map(x=>x.vt),half=Math.floor(v.length/2);
           return v.length>=4&&median(v.slice(-half))<median(v.slice(0,half));};
@@ -153,6 +290,8 @@
       });
   }
   function groupActionGate(s,f,now){
+    const cdr=cdrGate(s,f,now);if(!cdr.ready)return cdr;
+    if(cdrPrimary(s))return {ready:true};
     if(preBlockRebounding(s,f))return {ready:false,reason:'VT đang tăng qua nhiều mẫu trước xử lý; tiếp tục theo dõi, chưa đổi số'};
     if(f.state==='SUSPECTED'&&!f.incident?.locked&&Number.isFinite(f.currentVt)&&f.currentVt>f.baseline*s.config.suspectRatio)
       return {ready:false,reason:'VT hiện tại đã vượt ngưỡng nghi block; chờ mẫu mới, chưa đổi số'};
@@ -199,7 +338,7 @@
       median(recovery.slice(-4))>=median(recovery.slice(0,4))*0.85;
     if(stable)return false;
     if(i.isBackup||i.backupUsed||!i.oldPhone||!(i.autoExecuted||i.manualExecuted)||i.actionPending||i.actionUncertain||
-      now-switched<(c.backupBlockWaitMs??15000)||recovery.length!==policy.samples||
+      now-switched<(c.backupBlockWaitMs??5000)||recovery.length!==policy.samples||
       !recovery.every(v=>v<=f.baseline*c.suspectRatio)||
       median(recovery.slice(-4))>median(recovery.slice(0,4)))return false;
     const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
@@ -228,13 +367,15 @@
       const oldGroup=f.groupId;
       f.groupId=Number.isInteger(n.groupId)?n.groupId:null;f.groupIdAt=now;
       const expected=group==='99.153'?2:3;
+      if(f.groupId===expected&&oldGroup!=null&&oldGroup!==expected){f.activatedAt=now;f.activationInitialVt=n.used;f.cdrEnabledAt=now;}
+      else if(f.groupId!==expected){f.activatedAt=null;f.activationInitialVt=null;}
       if(f.groupId!==null&&f.groupId!==expected){
         if(f.state!=='INACTIVE'||f.incident||f.baseline!=null){
           if(f.incident){f.incident.cancelled=true;f.incident.closeReason='OpenSIPS Group ID disabled';}
           resetBaseline(s,f,now,'FS đã tắt trên OpenSIPS; bỏ qua VT còn treo');
         }
       }else if(f.groupId===expected&&oldGroup!=null&&oldGroup!==expected){
-        resetBaseline(s,f,now,'FS bật lại trên OpenSIPS; học baseline mới');
+        resetBaseline(s,f,now,'FS bật lại trên OpenSIPS; chờ dữ liệu mới');f.cdrEnabledAt=now;
       }
 
       if(f.updatedAt&&now-f.updatedAt>c.sampleGapMs){f.history=[];f.severeWindows=0;f.healthyHistory=[];if(f.incident)f.incident.stableSince=null;}
@@ -242,6 +383,29 @@
       const recent=f.history.slice(-c.recentSamples).map(x=>x.vt);
       f.recentMedian=median(recent);f.baselineVt=f.baseline;
       f.dropPercent=f.baseline>0?Math.round((1-f.recentMedian/f.baseline)*100):null;
+      if(cdrPrimary(s)){
+        if(!isFsActive(s,f,now))f.state='INACTIVE';
+        else if(!paused&&s.monitoringEnabled&&s.config.cdrRequireVtDrop&&!f.incident){
+          // Learn twenty live samples; freeze the old baseline before a collapse.
+          if(n.used>c.activeVtMin&&(!f.baseline||n.used>f.baseline*c.watchRatio)){
+            f.healthyHistory=[...(f.healthyHistory||[]),n.used].slice(-c.baselineSamples);
+            if(f.healthyHistory.length>=c.baselineSamples)f.baseline=median(f.healthyHistory);
+          }else if(!f.baseline)f.healthyHistory=[];
+          relearnHybridBaseline(s,f,now);
+          f.baselineVt=f.baseline;f.dropPercent=f.baseline>0?Math.round((1-n.used/f.baseline)*100):null;
+        }
+        if(s.config.cdrRequireVtDrop){
+          if(f.baseline&&n.used<f.baseline*c.healthyRatio){
+            if(!f.vtDeclineAt){
+              const lastHigh=f.history.findLastIndex(x=>x.vt>=f.baseline*c.healthyRatio);
+              f.vtDeclineAt=f.history[lastHigh+1]?.time||now;
+            }
+          }
+          else {f.vtDeclineAt=null;f.pairedCdrProof=null;f.baselineRelearnNote=null;}
+          if(cdrVtDrop(s,f,now))f.vtDropAt=f.vtDropAt||now;else f.vtDropAt=null;
+        }
+        if(isFsActive(s,f,now)&&!f.incident&&!f.cdr?.decision)f.state='WAITING_CDR';continue;
+      }
       if(paused||!s.monitoringEnabled||!isFsActive(s,f,now))continue;
       if(f.incident?.isBackup&&!f.incident.locked&&s.rotationBarriers?.[group]){
         const a=backupAssessment(s,f,now);
@@ -370,12 +534,13 @@
     }
     refreshAlerts(s,now);
   }
-  function refreshAlerts(s,now){applySchedule(s,now);s.alerts=s.monitoringEnabled?Object.values(s.fsStates||{}).filter(f=>isFsActive(s,f,now)&&!pausedFor(s,f.group)&&f.state==='SUSPECTED'&&!f.incident?.autoExecuted&&now-f.updatedAt<=s.config.staleMs).map(f=>({
+  function refreshAlerts(s,now){applySchedule(s,now);updateCdrStates(s,now);s.alerts=s.monitoringEnabled?Object.values(s.fsStates||{}).filter(f=>isFsActive(s,f,now)&&!pausedFor(s,f.group)&&f.state==='SUSPECTED'&&!f.incident?.autoExecuted&&now-f.updatedAt<=s.config.staleMs).map(f=>({
     group:f.group,fs:f.fs,ip:f.ip,currentVt:f.currentVt,phone:f.incident?.oldPhone,isBackup:!!f.incident?.isBackup,baselineVt:f.baseline,recentMedian:f.recentMedian,dropPercent:f.dropPercent,
     incidentId:f.incident?.id,isBackup:!!f.incident?.isBackup,actionPending:!!f.incident?.actionPending,actionUncertain:!!f.incident?.actionUncertain})):[];}
   function recordManualSwap(s,f,now,detail,newPhone){
     applySchedule(s,now);
     if(!isFsActive(s,f,now)||pausedFor(s,f.group)||f.state!=='SUSPECTED'||!f.incident||f.incident.locked||f.incident.autoExecuted)return false;
+    f.cdrUsedCallIds=[...new Set([...(f.cdrUsedCallIds||[]),...(f.cdr?.callIds||[])])].slice(-64);
     Object.assign(f.incident,{locked:true,manualExecuted:true,actionCount:1,switchedAt:now,newPhone});
     f.switchedAt=now;
     transition(s,f,'COOLDOWN',now,detail);
@@ -434,6 +599,6 @@
     }
     refreshAlerts(s,now);
   }
-  const api={groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
+  const api={activationBlockReady,hybridVtReady,relearnHybridBaseline,pairedCdrProof,manualCdrProof,cdrVtDrop,cdrPrimary,updateCdrStates,preBlockRebounding,cdrGate,groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
   if(typeof module!=='undefined')module.exports=api;else root.Detection=api;
 })(globalThis);

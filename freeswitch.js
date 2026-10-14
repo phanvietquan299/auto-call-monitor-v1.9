@@ -21,8 +21,26 @@
     return out;
   }
 
+  function parseBackupSummary(){
+    const nodes=[];
+    for(const table of document.querySelectorAll('table')){
+      if(typeof table.querySelectorAll!=='function')continue;
+      const rows=[...table.querySelectorAll('tr')];
+      const header=rows.find(r=>/BACKUP/i.test(r.innerText||r.textContent||'')&&/NODE\s*ID/i.test(r.innerText||r.textContent||''));
+      if(!header)continue;
+      const labels=[...header.children].map(c=>(c.innerText||c.textContent||'').trim().toUpperCase());
+      const fsIndex=labels.findIndex(x=>/^NODE\s*ID$/.test(x)),backupIndex=labels.indexOf('BACKUP');
+      if(fsIndex<0||backupIndex<0)continue;
+      for(const row of rows){
+        const cells=[...row.children],name=(cells[fsIndex]?.innerText||cells[fsIndex]?.textContent||'').trim().toUpperCase();
+        const value=(cells[backupIndex]?.innerText||cells[backupIndex]?.textContent||'').trim();
+        if(/^FS\d+$/.test(name)&&/^\d+$/.test(value))nodes.push({fs:name,backups:Number(value)});
+      }
+    }
+    return nodes;
+  }
   function publish(){
-    send({type:"FREESWITCH_SAMPLE",data:{numbers:parseNumbers()}});
+    send({type:"FREESWITCH_SAMPLE",data:{numbers:parseNumbers(),backupSummary:parseBackupSummary()}});
   }
 
   chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{

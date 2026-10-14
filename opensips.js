@@ -66,7 +66,7 @@
   }
 
   async function poll(){
-    if(busy||globalThis.fsSwitchBusy) return;
+    if(busy||globalThis.fsSwitchBusy||globalThis.OpenSipsPage&&OpenSipsPage.role()==='CDR') return;
     busy=true;
     try{
       // Exact legacy form action:
@@ -111,7 +111,10 @@
     poll();
   }).catch(()=>{ poll(); });
 
-  chrome.runtime.onMessage.addListener(msg => {
+  chrome.runtime.onMessage.addListener((msg,_sender,reply) => {
+    if(msg.type==="OPENSIPS_POLL_NOW"){
+      poll().then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:String(e)}));return true;
+    }
     if (msg.type === "MONITORING_CHANGED") {
       monitoringEnabled = !!msg.enabled;
       if (monitoringEnabled) poll();

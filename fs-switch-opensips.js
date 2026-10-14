@@ -43,9 +43,9 @@
     return request(action,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:body.toString()});
   }
   async function reloadServer(page,button){
-    const handler=button.getAttribute?.('onclick')||'';
+    const handler=button?.getAttribute?.('onclick')||'';
     let result;
-    if(/\bapply_changes\s*\(/.test(handler)){
+    if(!button||/\bapply_changes\s*\(/.test(handler)){
       // OpenSIPS CP 8.3.2's button performs this GET, not a form submit.
       result=await request(url('apply_changes.php',page.href));
     }else if(button.type==='button'){
@@ -105,6 +105,15 @@
         reply({ok:false,error:'FS không thuộc phạm vi được phép trên trang này.'});return;
       }
       refresh().then(page=>reply({ok:true,groupId:readGroup(row(page,msg.node)),used:readVt(row(page,msg.node)),pageId})).catch(e=>reply({ok:false,error:String(e.message||e)}));return true;
+    }
+    if(msg.type==='FS_SWITCH_RELOAD_SERVER'){
+      if(msg.group!==group){reply({ok:false,error:'Nhóm OpenSIPS không khớp.'});return;}
+      if(running){reply({ok:false,error:'OpenSIPS đang chuyển FS.'});return;}
+      running=true;globalThis.fsSwitchBusy=true;
+      // CP's standalone Reload is the known MI endpoint; listing variants may omit the button.
+      reloadServer({href:listing},null).then(()=>refresh())
+        .then(()=>reply({ok:true,reloaded:true,group})).catch(error=>reply({ok:false,error:String(error.message||error)}))
+        .finally(()=>{running=false;globalThis.fsSwitchBusy=false;});return true;
     }
     if(msg.type!=='FS_SWITCH_SET_GROUP')return;
     if(running){reply({ok:false,error:'OpenSIPS đang chuyển FS.'});return;}

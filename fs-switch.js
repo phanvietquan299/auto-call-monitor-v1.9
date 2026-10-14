@@ -6,6 +6,7 @@
     '99.155':{profile:'TELESALE',groupId:3,fs:['FS05','FS06','FS07']}
   };
   const BACKUP_THRESHOLD=10;
+  const threshold=feature=>Number.isSafeInteger(feature.backupThreshold)&&feature.backupThreshold>=0?feature.backupThreshold:BACKUP_THRESHOLD;
   const fresh=(at,now)=>Number.isFinite(at)&&now-at>=0&&now-at<=45000;
   function plans(state,feature,now){
     if(!state.monitoringEnabled||['FAILED','RUNNING'].includes(feature.operation?.status))return [];
@@ -14,9 +15,11 @@
       if(state.schedule?.groups?.[group]?.paused||!fresh(state.opensips?.[group]?.updatedAt,now)||!fresh(state.freeswitch?.updatedAt,now))continue;
       const nodes=(state.opensips[group].nodes||[]).filter(n=>p.fs.includes(n.fs)&&n.resource==='vt'&&Number.isInteger(n.destinationId)&&n.destinationId>0&&n.groupId!=null);
       const rows=state.freeswitch.numbers||[];
+      const preset=feature.nextSwitch?.[group];
       const backups=fs=>rows.filter(n=>n.fs===fs&&n.profile===p.profile&&n.status==='BACKUP').length;
       const active=fs=>rows.filter(n=>n.fs===fs&&n.profile===p.profile&&n.status==='ACTIVE');
       for(const source of nodes){
+        if(preset?.source&&source.fs!==preset.source)continue;
         const f=Object.values(state.fsStates||{}).find(f=>f.group===group&&f.fs===source.fs&&f.ip===source.ip);
         if(state.fsTestExclusions?.[`${group}|${source.fs}`]||source.groupId!==p.groupId||f?.state!=='SUSPECTED'||!f.incident||f.incident.locked||f.incident.cancelled||!fresh(f.updatedAt,now))continue;
         if(detection&&!detection.groupActionGate(state,f,now).ready)continue;
@@ -24,13 +27,14 @@
         const key=`${group}|${source.fs}|${f.incident.id}`;
         if(feature.handled?.[key]||feature.quarantined?.[`${group}|${source.fs}`])continue;
         const count=backups(source.fs);
-        if(count>BACKUP_THRESHOLD||active(source.fs).length!==1)continue;
-        const targets=nodes.filter(n=>n.fs!==source.fs&&n.groupId===0&&!state.fsTestExclusions?.[`${group}|${n.fs}`]&&
-          !feature.quarantined?.[`${group}|${n.fs}`]&&backups(n.fs)>count&&active(n.fs).length===1&&active(n.fs)[0].hasStatusControl)
+        if((!preset&&count>threshold(feature))||active(source.fs).length!==1)continue;
+        const targets=nodes.filter(n=>n.fs!==source.fs&&(!preset||n.fs===preset.target)&&n.groupId===0&&!state.fsTestExclusions?.[`${group}|${n.fs}`]&&
+          !feature.quarantined?.[`${group}|${n.fs}`]&&(preset||backups(n.fs)>count)&&active(n.fs).length===1&&active(n.fs)[0].hasStatusControl)
           .sort((a,b)=>backups(b.fs)-backups(a.fs)||a.fs.localeCompare(b.fs));
-        const target=targets[0];if(!target)continue;
+        const action=preset&&!preset.target?'DISABLE':preset&&!preset.source?'ENABLE':'SWITCH';
+        const target=action==='DISABLE'?source:targets[0];if(!target)continue;
         if(nodes.filter(n=>n.fs===source.fs).length!==1||nodes.filter(n=>n.fs===target.fs).length!==1)continue;
-        out.push({key,group,profile:p.profile,groupId:p.groupId,source:{fs:source.fs,ip:source.ip,id:source.destinationId,backups:count,baseline:f.baseline},
+        out.push({key,action,presetSource:preset?.source||'',preset:!!preset,group,profile:p.profile,groupId:p.groupId,source:{fs:source.fs,ip:source.ip,id:source.destinationId,backups:count,baseline:f.baseline},
           target:{fs:target.fs,ip:target.ip,id:target.destinationId,backups:backups(target.fs),phone:active(target.fs)[0].phone},incidentId:f.incident.id});
       }
     }
@@ -58,8 +62,9 @@
         else if(node.groupId!==p.groupId)reason=`FS chưa chạy trong nhóm này (Group ID ${node.groupId}; cần ${p.groupId}).`;
         else if(state.fsTestExclusions?.[`${group}|${fs}`])reason='FS còn nằm trong khóa test OpenSIPS; trả về Group ID 0 bằng test tắt trước.';
         else if(!f||!fresh(f.updatedAt,now))reason='Chưa có VT mới để đánh giá sự cố.';
-        else if(count>BACKUP_THRESHOLD)reason=`BACKUP ${count} > ngưỡng ${BACKUP_THRESHOLD}.`;
-        else if(f.state!=='SUSPECTED')reason=`BACKUP đã ≤ ${BACKUP_THRESHOLD}, nhưng trạng thái ${f.state}; chỉ thay tại lượt nghi block.`;
+        else if(!plan&&feature.nextSwitch?.[group])reason=`Đặt trước ${feature.nextSwitch[group].source} → ${feature.nextSwitch[group].target}: chờ nguồn locked, đích Group ID 0 và dữ liệu hợp lệ.`;
+        else if(count>threshold(feature)&&!plan)reason=`BACKUP ${count} > ngưỡng ${threshold(feature)}.`;
+        else if(f.state!=='SUSPECTED')reason=`BACKUP đã ≤ ${threshold(feature)}, nhưng trạng thái ${f.state}; chỉ thay tại lượt nghi block.`;
         else if(!f.incident||f.incident.locked||f.incident.cancelled)reason='Sự cố đã xử lý/đang khóa hoặc đã hủy; không chuyển lại.';
         else if(feature.quarantined?.[`${group}|${fs}`]||feature.handled?.[`${group}|${fs}|${f.incident.id}`])reason='FS/sự cố còn khóa từ lượt chuyển trước.';
         else if(rows.filter(n=>n.status==='ACTIVE').length!==1)reason='FS nguồn không có đúng một số ACTIVE.';
@@ -94,7 +99,7 @@
     // target, normal BLOCK can continue; later incidents recompute all counts.
     return plans(state,feature,now).some(plan=>plan.group===f.group&&plan.source.fs===f.fs&&plan.source.ip===f.ip&&plan.incidentId===f.incident.id);
   }
-  const identity=p=>JSON.stringify([p.key,p.source.id,p.source.backups,p.target.fs,p.target.id,p.target.backups,p.target.phone]);
+  const identity=p=>JSON.stringify([p.action,!!p.preset,p.key,p.source.id,p.source.backups,p.target.fs,p.target.id,p.target.backups,p.target.phone]);
   async function execute(plan,feature,deps){
     if(feature.operation?.status==='RUNNING')throw Error('Đang có lượt chuyển FS.');
     const op={id:`switch-${deps.now()}`,plan,status:'RUNNING',stage:'VALIDATING',startedAt:deps.now()};
@@ -104,16 +109,17 @@
     try{
       await deps.validate(plan);
       op.stage='DISABLE_SOURCE';await deps.save(feature);
-      await deps.setGroup(plan.group,plan.source,plan.groupId,0);
+      if(plan.action!=='ENABLE')await deps.setGroup(plan.group,plan.source,plan.groupId,0);
       op.stage='ENABLE_TARGET';await deps.save(feature);
-      await deps.setGroup(plan.group,plan.target,0,plan.groupId);
+      if(plan.action!=='DISABLE')await deps.setGroup(plan.group,plan.target,0,plan.groupId);
       op.stage='MONITORING_TARGET';await deps.save(feature);
-      if(deps.monitorTarget)await deps.monitorTarget(plan);
+      if(deps.monitorTarget&&(!plan.action||plan.action==='SWITCH'))await deps.monitorTarget(plan);else op.stage='ROUTING_VERIFIED';
       op.status='DONE';op.finishedAt=deps.now();
+      if(plan.preset&&(feature.nextSwitch?.[plan.group]?.source||'')===(plan.presetSource??plan.source.fs)&&(feature.nextSwitch[plan.group].target||'')===(plan.action==='DISABLE'?'':plan.target.fs))delete feature.nextSwitch[plan.group];
     }catch(error){op.status='FAILED';op.error=String(error.message||error);op.finishedAt=deps.now();}
     feature.history=[op,...(feature.history||[])].filter(x=>x.startedAt>deps.now()-3*86400000);
     await deps.save(feature);return op;
   }
-  const api={BACKUP_THRESHOLD,groups,plans,diagnostics,holds,identity,execute};
+  const api={threshold,BACKUP_THRESHOLD,groups,plans,diagnostics,holds,identity,execute};
   if(typeof module!=='undefined')module.exports=api;else root.FsSwitch=api;
 })(globalThis);

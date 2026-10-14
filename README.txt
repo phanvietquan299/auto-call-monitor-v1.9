@@ -1,3 +1,121 @@
+1.15.1: Lịch sử chính lưu PostgreSQL Supabase project callcenter qua RPC có mã truy cập giới hạn lịch sử. PAT/service_role không vào extension. IndexedDB là outbox/offline và tự di chuyển log cũ; retry 15s/alarm 30s, không chặn thao tác realtime bởi mạng. Xóa phải kết nối Supabase, không xóa local khi server lỗi. supabase-config.js local bị ignore; cần giữ file khi tải extension. Chưa triển khai giao diện/điều khiển điện thoại.
+
+1.15.0: Lịch sử thành công lưu IndexedDB auto-call-history, không tự xóa. Di chuyển log còn trong storage sang DB; state realtime giữ tối đa 200 sự kiện. Lọc ngày/xóa thời gian đọc DB, bảng phân trang giữ nguyên. DB local, chưa đồng bộ server; gỡ extension có thể mất dữ liệu.
+
+1.14.24: Đặt riêng chỉ tắt/chỉ bật FS ở lần locked tiếp theo bằng chọn — ở ô bỏ qua; chỉ bật kích hoạt khi một FS cùng nhóm locked. Hai mode, một lần, Save + Reload và log chung giữ nguyên.
+
+1.14.23: Ngưỡng BACKUP cấu hình và lưu qua ô nhập số; áp dụng hai mode, mặc định 10. Trạng thái chuyển FS nằm dưới thống kê/lịch sử.
+
+1.14.22: Cặp đặt FS dùng grid thẳng cột, responsive màn nhỏ, nút Lưu xanh và Hủy viền nhẹ; trạng thái nhỏ gọn dưới từng nhóm. Không đổi logic.
+
+1.14.21: FS vừa bật có mẫu VT mới không tăng và CDR mới 5/5 thì BLOCK ngay, không chờ cứng 5s. Dự phòng số chờ 5s, tiếp tục đánh giá; lượt Thay FS đã xác minh không cộng thêm 30s. Giữ giãn thao tác 3s, hai mode và một lần dự phòng.
+
+1.14.20: Luồng hybrid kết thúc Thay FS sau Save + Reload xác minh, bỏ khóa chờ HEALTHY và watcher BLOCK riêng. AUTO BLOCK tiếp quản FS vừa bật với quy tắc VT/CDR, hai mode. Lượt lỗi theo dõi cũ chỉ được gỡ khi dữ liệu mới xác minh nguồn 0/đích đúng Group ID; không gỡ lỗi ghi chưa rõ.
+
+1.14.19: Rút gọn phần đặt FS; bỏ link lịch sử/kiểm tra chi tiết. Cảnh báo CDR đặc biệt tự ẩn sau 15s, có nút × đóng sớm; không đổi logic BLOCK.
+
+1.14.18: Đặt cặp FS ngay dưới toolbar THAY FS, không card riêng. Chuyển FS thành công ghi chung lịch sử. Theo dõi đích dùng tab đã xác minh thay vì tìm lại role giữa reload; khôi phục lượt lỗi tìm Load Balancer ở bước MONITORING_TARGET.
+
+1.14.17: Đặt trước một cặp tắt/bật FS cho lần locked tiếp theo, riêng Col/Sale, dùng một lần và theo hai mode. Cặp đặt trước bỏ qua quy tắc BACKUP; Group ID, CDR/VT, lịch nghỉ và xác minh Save/Reload giữ nguyên. Test giữ local, bỏ khỏi Git.
+
+1.14.16: VT + CDR đủ điều kiện thì BLOCK không chờ nhóm 9s hay yêu cầu CDR mới sau FS khác. Giãn mọi thao tác FreeSWITCH 3s ở hai mode và hai nhóm; dự phòng vẫn 8s.
+
+1.14.15: Dự phòng chờ 8s; tiếp tục đánh giá mỗi cập nhật VT/CDR, không bỏ theo dõi chỉ vì CDR tạm dưới 5/5 khi VT chưa tăng. Tối đa một lượt đổi dự phòng; hai mode giữ nguyên.
+
+1.14.14: FS vừa bật chờ 5s, VT không tăng + CDR mới sau bật đủ 5/5 cho phép BLOCK không cần baseline. Sau đổi số chờ 15s và >=2 mẫu VT mới không tăng, CDR sau đổi vẫn 5/5 thì cho một lượt dự phòng, đúng số ACTIVE mới, tối đa 2 lượt; hai mode giữ nguyên.
+
+1.14.13: Đọc số BACKUP từ bảng tổng quan FreeSWITCH; giữ cache hiển thị khi danh sách số trống/lọc ACTIVE. Cột BACKUP bằng 0 hợp lệ vẫn cập nhật. Cache không dùng xác minh số ACTIVE hay cho phép BLOCK.
+
+1.14.12: Yêu cầu BLOCK tay đã xác nhận giữ ổn định dù VT/CDR dao động; chờ nhóm không xóa popup, khóa nút xác nhận và hiển thị lý do. Đổi số/FS tắt/hủy/OFF/lịch nghỉ vẫn chặn.
+
+1.14.11: Log cảnh báo riêng khi 5 CDR mới liên tiếp 480-30-0, 408-30-0 hoặc 487-32-0 ở FS đang hoạt động; hiện ngay phía trên dashboard, lưu 3 ngày, chống lặp trong cùng đợt. Không dùng các mẫu này để tự BLOCK.
+
+1.14.10: Hiển thị FSxx (số BACKUP còn lại) theo đúng FS/profile từ FreeSWITCH; chưa có dữ liệu hiển thị (—).
+
+1.14.9: Hiển thị lý do/countdown baseline chưa học lại; khôi phục thời điểm bắt đầu đợt VT thấp từ lịch sử khi state cũ thiếu timestamp. Giữ ngưỡng chờ 120s/cửa sổ ổn định 60s và kiểm tra CDR.
+
+1.14.8: Khôi phục học baseline thấp điểm theo cấu hình cũ: đợt giảm >120s, cửa sổ ổn định 60s đủ >=20 mẫu, VT >10, CDR mới không locked; không học từ chuỗi lỗi. Trong nhóm ưu tiên VT thấp, sau xử lý cần CDR 5/5 mới của FS còn lại và VT không hồi để thay tiếp.
+
+1.14.7: State kết hợp VT/CDR: LEARNING khi chưa baseline, WATCHING khi VT <=70%, WARNING khi <=50% hoặc CDR 5/5 chưa đủ VT, SUSPECTED chỉ khi VT <=35% và CDR xác minh. VT thấp không hiện HEALTHY chỉ vì CDR chưa đủ; dữ liệu thiếu/stale có ghi chú. Giữ thao tác và giữ bằng chứng 15s.
+
+1.14.6: Sau Reload on Server thành công tải lại tab Load Balancer để cập nhật trang/khởi động lại đọc VT. Kiểm thử AUTO BLOCK với chuỗi 480-0-0/480-1-0 xen kẽ; bộ đếm tính chung cả hai.
+
+1.14.5: Giảm thời gian ghép bằng chứng CDR 5/5 với VT xuống 15s.
+
+1.14.4: Giữ CDR 5/5 tối đa 30s trong đợt VT giảm (<85% baseline), cho phép CDR xuất hiện trước lúc VT còn <=35%. VT hồi >=85%, đổi số/FS tắt/epoch mới/hết 30s làm bằng chứng hết hiệu lực. Giữ xác nhận tay và khóa xử lý.
+
+1.14.3: Chuỗi 480-1-0 liên tiếp tự đủ điều kiện CDR 5/5; bỏ yêu cầu phải có một 480-0-0. Giữ VT tụt theo baseline, Group ID, xác nhận tay/tự động và chống thao tác lặp.
+
+1.14.2: Giữ bằng chứng CDR 5/5 cho yêu cầu BLOCK xác nhận tay khi VT vẫn thấp và đúng Group ID/số ACTIVE; không đóng popup chỉ vì lượt CDR tiếp theo dưới ngưỡng. Hủy/VT hồi/FS tắt/số đổi/lịch nghỉ/Monitor OFF vẫn chặn. Tự động giữ đánh giá CDR hiện tại.
+
+1.14.1: Giữ hai bảng Collection/Sale xếp dọc, không chuyển sang thẻ khi màn hình nhỏ; kéo ngang xem các cột. Không đổi cơ chế phát hiện/thao tác.
+
+1.14.0: CDR tối thiểu 2s/FS. Mặc định kết hợp VT tụt <=35% baseline và CDR đủ 5/5 trong một lượt, không chờ xác nhận CDR thứ hai. Baseline median 20 mẫu VT 1s, giữ baseline khi tụt. Responsive bảng thành thẻ FS ở <=1000px, đủ các thông tin không kéo ngang.
+
+1.13.7: Search CDR FS tiếp theo không chờ hàng đợi ghi FreeSWITCH; cập nhật bằng timestamp lúc nhận response để không coi dữ liệu bị xếp hàng là mới. Đọc vai trò tab song song. Giữ hai lượt xác nhận, nhịp CDR 3s và khoảng cách ghi.
+
+1.13.6: Reload riêng gọi trực tiếp endpoint apply_changes.php của Load Balancer, kiểm tra lb_reload Success, không phụ thuộc nút trong HTML listing. Toolbar 3 hàng: Monitor/Xóa log, AUTO BLOCK/chế độ BLOCK, Thay FS/chế độ Thay FS.
+
+1.13.5: Nút Reload on Server riêng mỗi nhóm trên dashboard, gọi đúng handler lb_reload của OpenSIPS, chỉ báo thành công khi server trả Success.
+
+1.13.4: Bỏ nút Test BLOCK FS01. Đồng bộ giao diện chọn chế độ Thay FS với BLOCK. Thêm nút số Collection 1–4/Sale 5–7 bật/tắt Group ID có xác nhận, Save + Reload + refresh/xác minh; xanh đang bật, đỏ tắt, xám chưa xác minh. Giữ tự động thay FS riêng.
+
+1.13.3: Nhịp Search CDR tối thiểu 3s/FS để test; hai lượt xác nhận giữ nguyên. Reload cả công cụ Load Balancer và CDR mỗi 30s ở tab nền, giữ đúng vai trò từng tab. Chuỗi 480-0-0/480-1-0 liên tiếp hoặc xen kẽ tính chung, cần ít nhất một 480-0-0.
+
+1.13.2: Chỉ hiển thị 3 dòng CDR. AUTO BLOCK cần hai lượt đọc CDR liên tiếp đủ 5 cuộc: lượt đầu SUSPECTED, lượt kế tiếp còn đủ mới cho đổi số (cả xác nhận tay và tự động). Lượt không đủ/lỗi ngắt xác nhận; refresh dashboard không tính là lượt đọc mới.
+
+1.13.1: Thêm lại VT trên bảng gộp để quan sát; bỏ cột Thông tin/BLOCK và Cuộc gọi/giây. Giữ 5 dòng CDR mới nhất và bộ đếm. Nguồn phát hiện vẫn CDR, cơ chế thao tác không thay đổi.
+
+1.13.0: CDR là nguồn chính phát hiện BLOCK cho Col/Sale; chuỗi 5 cuộc mới 480-0-0/480-1-0 (có 480-0-0), dữ liệu mới tối đa 30s, response tối đa 15s, đúng FS/Group ID/số ACTIVE. VT không kích hoạt SUSPECTED, chặn hành động hay quyết định hồi phục. Sau đổi số dùng CDR mới sau thao tác, giữ một lượt dự phòng sau 15s khi vẫn lỗi. Chế độ xác nhận/tự động, lịch nghỉ và khóa thao tác giữ nguyên. Gộp bảng, bỏ VT/Baseline/Recent/Drop; chỉ hiển thị 5 dòng CDR mới nhất. Chỉ reload CDR mỗi 30s ở tab nền; Load Balancer vẫn đọc Group ID không reload.
+
+1.12.16: Dấu CDR đủ 5/5 tự bỏ sau hai lần đọc dưới ngưỡng cách nhau tối thiểu 5s, hoặc hết 30s khi đang dưới ngưỡng. Dữ liệu quá 15s không hiển thị cảnh báo cũ, báo chờ cập nhật. Giữ lịch sử ghi nhận riêng; không tự kích hoạt BLOCK.
+
+1.12.15: CDR cập nhật DOM tại chỗ, giữ vùng cuộn/ngón tay khi polling; bảng có vùng kéo ngang ở cửa sổ nhỏ. Bảng VT có Đánh giá CDR, lưu lần đủ 5/5 với thời gian và hiển thị riêng số đếm hiện tại. Dấu ghi nhận là lịch sử đối chiếu, không tự BLOCK; đổi số điện thoại sẽ bỏ dấu cũ khi đọc CDR tiếp theo.
+
+1.12.14: Chuỗi CDR mới nhất cho phép xen kẽ 480-1-0 trong 480-0-0, cần ít nhất một 480-0-0 cùng chuỗi; ngưỡng 5, khác mã/Setup ngoài 0-1/Duration khác 0 ngắt chuỗi. Search giữ 5s/FS; AUTO BLOCK vẫn theo VT.
+
+1.12.13: Đọc CDR mỗi tối thiểu 5s/FS; VT giữ nhịp 1s. Reload công cụ không dùng timer trì hoãn; lệnh bị bận Search được xếp lại và thực hiện khi Search hoàn tất. HTML mẫu có 30 cuộc/trang: nhịp 5s chỉ bao phủ khoảng 6 cuộc/s trước độ trễ mạng, cao hơn cần đọc thêm trang.
+
+1.12.12: Thêm cột Cuộc gọi/giây từng FS theo timestamp CDR, hiện giây mới nhất và 5 giây có dữ liệu. Gộp các lần Search bằng Call ID để không đếm trùng, giữ tối đa 60s/2000 ID. Ghi rõ số tối thiểu quan sát được do phân trang; không coi giây không có dữ liệu là 0. Không thay đổi AUTO BLOCK.
+
+1.12.11: Tách bảng CDR thành cột Dãy CDR, Thông tin/BLOCK và Số lần liên tiếp. Vùng dãy số cuộn riêng; bộ đếm ngưỡng 5, cơ chế đọc và AUTO BLOCK giữ nguyên.
+
+1.12.10: Khi có hai tab cùng máy chủ, gán tab mở trước (ID nhỏ hơn) Load Balancer, tab tiếp theo CDR. Alarm 30s reload công cụ ở tab nền; nếu đang sai mục tự chuyển đúng endpoint. Hai máy chủ gán độc lập. Giữ bỏ qua tab đang xem và thao tác đang chạy.
+
+1.12.9: Khôi phục reload thật mỗi 30s cho công cụ Load Balancer/CDR ở tab nền. Reload trực tiếp frame công cụ thay vì main.php để giữ đúng mục; bỏ qua khi đang Search CDR hoặc thay FS. CDR vẫn tự đọc endpoint và tự lấy lại form, không cần chọn lại Destination/IP thủ công. Tab đang xem không tự reload.
+
+1.12.8: Đọc CDR trực tiếp từ endpoint cdrviewer.php qua bất kỳ tab OpenSIPS đã đăng nhập đúng máy chủ. Không bắt buộc mở CDR Viewer; ưu tiên tab CDR nếu có. Tự tải form/hidden fields, cache 60s, lấy lại form và thử lại một lần khi Search lỗi. Không điều hướng tab; AUTO BLOCK vẫn theo VT.
+
+1.12.7: CDR ngưỡng 5 cuộc 480/0/0 liên tiếp. Chế độ đối chiếu đếm cùng các hàng mới nhất đang hiển thị, không loại cuộc cũ hơn 30s; khử trùng Call ID. Chế độ xác minh giữ kiểm tra độ mới, không nhận bằng chứng chỉ quan sát. AUTO BLOCK vẫn theo VT.
+
+1.12.6: Heartbeat 30s đánh thức đọc VT ở tab nền bằng OPENSIPS_POLL_NOW thay vì reload main.php (tránh thay đổi công cụ do phiên server chung hai tab). CDR cũng được đánh thức từ alarm độc lập với mẫu VT. Không điều hướng tab đang xem, giữ hai vai trò Load Balancer/CDR riêng.
+
+1.12.5: Sửa đọc bảng CDR có tiêu đề phân trang lồng bên trong: không dùng tổng số th để loại hàng cuộc gọi. Cột bắt buộc quyết định độ dài hàng. Hiện thông báo số hàng nhận được nếu kết quả rỗng.
+
+1.12.4: CDR hiển thị toàn bộ cuộc gọi trả về đúng IP của FS đang bật, dạng SIP-Setup-Duration, không lọc 480/0/0. Nhịp kiểm tra 1 giây; mỗi nhóm đọc lần lượt tất cả FS, tránh Search chồng nhau; thời gian thực tế phụ thuộc phản hồi server. Hai nhóm đọc độc lập. Bảng mỗi FS có vùng cuộn cho kết quả; AUTO BLOCK vẫn theo VT.
+
+1.12.3: Bảng CDR chỉ hiện FS đang bật theo Group ID (Col=2, Sale=3). Search liên tục luân phiên các FS đang bật, không chờ VT giảm; mỗi nhóm một yêu cầu tại một thời điểm, hai nhóm độc lập. Hiện số cuộc nhận về, bộ SIP/Setup/Duration mới nhất và thời gian cập nhật. CDR chỉ đối chiếu, không quyết định AUTO BLOCK.
+
+1.12.2: Tách CDR thành bảng riêng bên dưới hai bảng VT. Khôi phục polling VT mỗi giây khi trang chưa nhận diện được vai trò; chỉ bỏ qua tab CDR, tránh ngừng VT ở main.php. CDR vẫn chỉ đối chiếu, không quyết định AUTO BLOCK.
+
+v1.12.1 — CDR đối chiếu thử nghiệm, không làm điều kiện AUTO BLOCK
+- Cấu hình mới và đã lưu đều cdrObservationEnabled=true, cdrVerificationEnabled=false. AUTO BLOCK/THAY FS giữ các quyết định VT hiện có, kể cả khi CDR chưa đủ 4 hoặc tab CDR lỗi; CDR chỉ Search/hiển thị, kết quả không kích hoạt thao tác.
+- Thêm cột CDR vào bảng từng FS: tổng chuỗi mới nhất liên tiếp 480/0/0 (không đếm trùng, không tính Setup 1), đủ 4 hay chưa, thời gian kiểm tra/lỗi, BLOCK đã xác nhận/tay-tự động/đang xử lý/chưa rõ/chưa ghi nhận.
+- Lưu cdrBlockOutcome khi trang xác nhận BLOCK thành công, gồm incident, phone, thời điểm, mode và số đếm CDR có sẵn lúc BLOCK. Nếu kết quả CDR đến sau BLOCK ghi rõ, không diễn giải là bằng chứng trước thao tác.
+- Nhận kết quả Search đang chạy kể cả thao tác vừa thành công, gắn đúng incident; không để kết quả sự cố cũ ghi đè sự cố mới. CDR không mở lại popup hoặc gọi thêm lượt AUTO trong chế độ đối chiếu.
+- Giữ phân biệt tab CDR/Load Balancer, truy vấn nền trên .153 và .155, các timer và giao diện cuộn bảng; tab CDR vẫn cần mở/đăng nhập để đọc được.
+- Kiểm thử toàn bộ: 310 tests pass, kiểm tra cú pháp worker/dashboard. Các test chế độ gate giữ riêng để ghép sau, production chưa bật gate.
+
+v1.12.0 — VT + CDR kiểm chứng locked cho cả Col và Sale
+- Mở riêng Load Balancer và CDR Viewer trên mỗi host: .153 Collection và .155 Sale (4 tab OpenSIPS khi dùng cả hai nhóm), cùng main.php vẫn được. Role được đọc từ DOM/iframe cùng origin; chỉ tab Load Balancer lấy VT/được refresh và thực hiện thay FS.
+- VT đủ nghi ngờ mới Search CDR theo Destination/IP. Search POST dùng form thật và URL của iframe, giữ hidden fields, gửi Search mới, giới hạn ngày hiện tại, chỉ đánh giá INVITE mới trong 30 giây và sau mốc sự cố/thay số; không dùng bảng cũ để xác nhận.
+- 4 Call ID khác nhau mới nhất liên tiếp đều SIP 480, Setup Time 0, Duration 0 mới cho phép đổi số/thay FS. 487/200/Setup 1/duration khác 0/giá trị trống ngắt chuỗi. Bằng chứng gắn incident/group/IP/ACTIVE phone, hết hạn 10 giây; Call ID đã dùng không dùng lại.
+- Truy vấn nền từng nhóm ngoài messageQueue, không chặn mẫu VT. Một Search đang chạy trên mỗi nhóm; chọn FS luân phiên, truy vấn lại khi kiểm tra cũ >=2 giây. Col/Sale đọc song song. Kết quả trả muộn sau VT hồi/sự cố đổi không được hành động.
+- Thiếu tab CDR, nhiều tab cùng role, chưa đủ 4 cuộc, lỗi Search hoặc dữ liệu cũ: WAITING_CDR, giữ cảnh báo, không fallback đổi số theo VT. Xác nhận tay chỉ mở khi đủ điều kiện; chế độ tự động dùng cùng kiểm tra. Các chờ nhóm 9 giây, lịch nghỉ và khóa cũ giữ nguyên.
+- FS đích vừa bật không tăng VT cũng cần CDR sau lúc bật trước BLOCK; chưa đủ thì Search lại, tối đa 120 giây trước khi báo cần kiểm tra thủ công. Test BLOCK FS01 chủ động vẫn là test riêng.
+- Kiểm chứng: 306 tests pass, kiểm tra cú pháp toàn bộ file mới và worker. Tests dùng DOM/API mô phỏng dựa trên HTML đã cung cấp; chưa kiểm tra trực tiếp trên server nội bộ.
+- Sau cập nhật: reload extension, tải lại tab FreeSWITCH/dashboard và các tab OpenSIPS; giữ mỗi host đúng 1 tab Load Balancer + 1 tab CDR Viewer, đăng nhập cùng phiên trình duyệt.
+
 v1.11.22 — Kiểm tra VT hồi trước lượt AUTO BLOCK đầu tiên, baseline 20 mẫu
 - Baseline Col/Sale 20 mẫu, chu kỳ 1 giây (~20 giây), cập nhật cả config lưu cũ qua getState.
 - Trước xử lý primary: xét 4–6 mẫu thấp liên tiếp mới nhất, trải ít nhất 3 giây. Trung vị nửa cuối tăng ít nhất max(2 VT, 5%) so nửa đầu, mẫu cuối không dưới trung vị nửa cuối, 2 mẫu cuối không giảm quá 5% so 2 mẫu trước: giữ WARNING và hủy yêu cầu đổi số chưa thực hiện, giữ baseline cũ.

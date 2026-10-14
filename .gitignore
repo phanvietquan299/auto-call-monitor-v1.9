@@ -1,2 +1,11 @@
 /notes_ip.md
 /task.md
+/tests/
+
+*.test.js
+
+/supabase.md
+
+/supabase-config.js
+
+*.md
