@@ -12,10 +12,9 @@ function fsRoutingActive(s,fs,profile){
 function manualStatusControl(s,fs,profile){
  const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
  const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
- const fresh=Date.now()-(row?.updatedAt||s.freeswitch?.updatedAt||0)<45000;
  if(!row)return `<div class="fs-phone-status muted"><span>Chờ số điện thoại</span><button class="secondary" data-refresh-phone="${esc(fs)}">Đọc lại số</button><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" disabled><option value="" selected>Chờ cập nhật số…</option><option value="ACTIVE">⚪ ACTIVE</option><option value="BACKUP">🔵 BACKUP</option><option value="BLOCKED">🔴 BLOCKED</option></select></div>`;
  const busy=manualStatusBusy.has(fs),active=fsRoutingActive(s,fs,profile);
- return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':!fresh?'<small class="muted">Sẽ kiểm tra lại số khi đổi</small>':''}</div>`;
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
 }
 document.querySelector('#groups').addEventListener('click',async event=>{
  const button=event.target.closest('[data-refresh-phone]');if(!button)return;
