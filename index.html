@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Auto Call Monitor</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0d172b"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  color-scheme:dark;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --bg:#0d172b;--card:#1b2940;--line:#3a4a62;--text:#e8eef8;--muted:#9ba9bd;
+  --good:#36e889;--bad:#ff7586;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+body{min-width:0}
+header{
+  position:sticky;top:0;z-index:5;background:rgba(13,23,43,.96);
+  backdrop-filter:blur(10px);padding:18px clamp(12px,3vw,32px) 14px;border-bottom:1px solid #263651
+}
+.header-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{min-width:0;overflow-wrap:anywhere;font-size:clamp(20px,2.5vw,34px);line-height:1.1;margin:0}
+.toolbar{display:grid;gap:8px;min-width:0;max-width:100%}.toolbar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar-row>button:first-child{min-width:170px}
+button{border:0;border-radius:11px;padding:10px 14px;font-size:clamp(13px,1.3vw,16px);cursor:pointer;white-space:nowrap}
+button.on{background:#39d98a;color:#07130d}button.off{background:#ff667a;color:#fff}
+button.secondary{background:#e9edf3;color:#111}
+main{width:min(1600px,100%);margin:auto;padding:16px clamp(12px,3vw,32px) 32px;display:grid;gap:16px}
+.card{background:var(--card);border-radius:16px;padding:clamp(12px,2vw,20px);min-width:0;overflow:hidden}
+#groups{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+#confirmations:empty,#confirmation-status:empty{display:none}
+#confirmation-status{padding:12px;border:1px solid var(--line);border-radius:10px}
+.auto-mode-label{display:flex;align-items:center;gap:8px;font-size:14px}
+#auto-block-mode,#fs-switch-mode{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--text);font-size:16px}
+button:disabled{opacity:.6;cursor:wait}
+.table-wrap{width:100%;max-width:100%;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
+table{width:100%;border-collapse:collapse;table-layout:auto}
+th,td{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px}td{font-size:14px}
+#groups th:nth-child(7),#groups td:nth-child(7){white-space:normal;overflow-wrap:anywhere;min-width:150px;max-width:230px}
+.cdr-records{max-height:240px;overflow:auto;line-height:1.7;font-variant-numeric:tabular-nums}
+#groups{width:100%;box-sizing:border-box}
+#groups table{min-width:850px}
+#groups th,#groups td{vertical-align:top}
+#groups .cdr-data{min-width:180px}
+#groups .cdr-count{min-width:130px;text-align:center}
+#groups .cdr-count b{display:inline-block;padding:8px 12px;border:1px solid var(--line);border-radius:10px}
+.muted{color:var(--muted)}.good{color:var(--good)}.bad,.down{color:var(--bad)}.up{color:#71e5a8}
+.watching{color:#f5d76e}.warning{color:#ffae58}.cooldown,.recovering{color:#9ca8ff}
+.action-note{margin-top:10px;padding:10px;border:1px solid var(--bad);border-radius:10px;color:#ffd6db;font-weight:700}
+.confirm-list{margin-top:12px;display:grid;gap:8px}
+.confirm-item{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:10px;background:#291d2b;border:1px solid var(--bad);border-radius:10px}
+.confirm-item span{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
+.confirm-item button{background:var(--bad);color:#fff;font-weight:700}
+.event{display:grid;grid-template-columns:90px 120px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px solid #33445d}
+.event>*{min-width:0;overflow-wrap:anywhere}.status{font-weight:800}
+@media(max-width:900px){.toolbar{width:100%}.toolbar button{flex:1 1 auto}}
+@media(max-width:600px){
+  header{position:static}
+  .header-row{align-items:flex-start}
+  .toolbar{width:100%}
+  .toolbar-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .toolbar-row>button:first-child{min-width:0}
+  .toolbar-row button{white-space:normal}
+  .toolbar-row .auto-mode-label{display:grid;gap:4px;font-size:12px;min-width:0}
+  .toolbar-row select{width:100%;min-width:0;font-size:13px!important}
+  #open-confirmation{grid-column:1 / -1}
+  main{padding-top:12px}
+  .card{border-radius:12px}
+  .event{grid-template-columns:72px 105px minmax(0,1fr);font-size:12px}
+  th,td{padding:8px 6px}
+}
+@media(max-width:420px){
+  .event{grid-template-columns:1fr;gap:3px}
+}
+#history-logs{--log-height:88px;display:grid;grid-auto-rows:var(--log-height);align-content:start;min-height:calc(8 * var(--log-height));margin-top:16px}
+#history-logs .event{grid-template-columns:126px 70px minmax(0,1fr);align-items:center;padding:10px 0;box-sizing:border-box}
+.log-time{display:flex;flex-direction:column;gap:4px;align-items:center;padding:8px;background:var(--bg);border:1px solid var(--line);border-radius:10px;font-variant-numeric:tabular-nums}
+.log-time b{font-size:17px;letter-spacing:.04em}.log-time span{font-size:12px;color:var(--muted)}
+.log-fs{font-weight:800}.log-result{overflow:auto;max-height:100%;font-size:14px}.log-result b{color:var(--good)}.log-phone{display:block;margin-top:5px;font-variant-numeric:tabular-nums}
+.history-pagination{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:16px}
+#history-pages{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+#history-pages button{min-width:40px;min-height:40px;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)}
+#history-pages button[aria-current="page"]{background:var(--good);color:#102033;font-weight:800}.page-ellipsis{padding:4px}
+#history-jump-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#history-jump,#history-date,#clear-history-dialog input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;color-scheme:dark}
+#history-jump{width:90px;min-width:0}#history-date{max-width:100%;box-sizing:border-box}
+@media(max-width:600px){#history-logs{--log-height:100px}#history-logs .event{grid-template-columns:100px 48px minmax(0,1fr);gap:8px}.log-time b{font-size:15px}.log-result{font-size:12px}.history-pagination{gap:10px}#history-page{flex-basis:100%}}
+@media(max-width:360px){#history-logs{--log-height:116px}#history-logs .event{grid-template-columns:90px minmax(0,1fr);grid-template-rows:22px 1fr;gap:4px 8px}.log-time{grid-row:1 / 3}.log-result{grid-column:2}.log-time b{font-size:13px}}
+dialog{width:min(560px,calc(100% - 24px));max-height:85vh;overflow:auto;border:1px solid var(--bad);border-radius:16px;background:var(--card);color:var(--text);padding:24px}
+dialog::backdrop{background:rgba(0,0,0,.7)}
+.dialog-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+.fs-switch-inline{width:100%;font-size:14px}.fs-switch-inline select{padding:8px;border-radius:8px;background:#1c2a40;color:#e8edf6;border:1px solid #51627b}.fs-node-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}.fs-node-group strong{min-width:110px}.fs-node-group button{min-width:48px;border-radius:12px}.fs-node-group button:disabled{opacity:.6}
+
+
+.fs-switch-inline{padding-top:14px;border-top:1px solid #263651;margin-top:6px}
+.fs-switch-inline>div>b{display:block;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.02em;margin-bottom:10px}
+#fs-switch-status{font-size:12px;color:var(--muted);margin-bottom:8px}
+#fs-switch-status:empty{display:none}
+.fs-preset-row{display:grid;grid-template-columns:92px minmax(90px,1fr) minmax(90px,1fr) 64px 64px;align-items:center;gap:10px;padding:10px 0;min-width:0}
+.fs-preset-row+.fs-preset-row{border-top:1px solid #263651}
+.fs-preset-group{font-size:13px}
+.fs-preset-row label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.fs-preset-row select{width:100%;min-width:0;height:38px;padding:6px 9px;font-size:13px;border-color:var(--line)}
+.fs-preset-row button{height:38px;padding:6px 12px;font-size:13px;font-weight:600;min-width:0;flex:none}
+.fs-preset-row .fs-preset-save{background:#39d98a;color:#07130d}
+.fs-preset-row .fs-preset-save:hover{background:#55e5a0}
+.fs-preset-row .fs-preset-clear{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.fs-preset-row .fs-preset-clear:hover{background:var(--card);color:var(--text)}
+.fs-preset-row select:focus-visible,.fs-preset-row button:focus-visible{outline:2px solid #39d98a;outline-offset:3px}
+.fs-preset-status{grid-column:2 / -1;color:var(--muted);font-size:11px;line-height:1.4;margin-top:-4px;overflow-wrap:anywhere}
+@media(max-width:520px){
+ .fs-preset-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 56px 56px;gap:8px}
+ .fs-preset-group{grid-column:1 / -1}
+ .fs-preset-status{grid-column:1 / -1}
+ .fs-preset-row label{gap:4px}
+}
+@media(max-width:360px){
+ .fs-preset-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .fs-preset-row button{width:100%}
+}
+
+.fs-threshold{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:16px;font-size:13px}
+.fs-threshold input{width:80px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font:inherit}
+.fs-threshold button{padding:8px 12px;font-size:13px}.fs-threshold span{font-size:11px}
+#fs-switch-status{margin-top:10px}
+#mobile-login[hidden]{display:none!important}
+@media(max-width:600px){header{padding:14px 12px}.toolbar-row{gap:10px}.toolbar-row button{min-height:44px}.table-wrap{scrollbar-width:thin}#groups table{min-width:850px}dialog{padding:18px}.fs-preset-row select{min-height:42px}main{padding:12px}.card{padding:14px}}
+</style>
+</head>
+<body>
+<div id="mobile-login" style="position:fixed;inset:0;z-index:100;background:#0d172b;display:grid;place-items:center;padding:24px"><div style="max-width:400px;text-align:center"><h1>AUTO CALL MONITOR</h1><p>Đăng nhập bằng liên kết riêng từ bot Telegram.</p><a href="https://t.me/CallCenter16725bot?start=app" style="display:inline-block;background:#39d98a;color:#07130d;padding:14px 20px;border-radius:12px;text-decoration:none;font-weight:700">Mở bot · gửi /app</a><p id="mobile-login-error" class="bad"></p></div></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;font-size:12px"><span id="mobile-connection" class="muted">Đang kết nối…</span><button id="mobile-logout" class="secondary" style="font-size:12px;padding:6px 10px">Đăng xuất</button></div>
+<header>
+  <div class="header-row">
+    <h1>AUTO CALL MONITOR</h1>
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <button id="toggle"></button>
+        <button class="secondary" id="clear">Xóa log theo thời gian</button>
+      </div>
+      <div class="toolbar-row">
+        <button id="auto"></button>
+        <label class="auto-mode-label">Chế độ BLOCK <select id="auto-block-mode"><option value="MANUAL">Xác nhận tay</option><option value="AUTOMATIC">Tự động</option></select></label>
+        <button class="secondary" id="open-confirmation" hidden>Xác nhận BLOCK</button>
+      </div>
+      <div class="toolbar-row">
+        <button class="off" id="fs-switch-open">THAY FS: OFF</button>
+        <label class="auto-mode-label">Chế độ Thay FS <select id="fs-switch-mode"><option value="MANUAL">Xác nhận tay</option><option value="AUTOMATIC">Tự động</option></select></label>
+      </div>
+  <div class="fs-switch-inline"><div class="fs-threshold"><label for="fs-backup-threshold">Đổi FS khi BACKUP ≤</label><input id="fs-backup-threshold" type="number" min="0" step="1" value="10"><button id="fs-threshold-save" class="on">Lưu ngưỡng</button><span id="fs-threshold-status" role="status" class="muted"></span></div><div><b>Đặt lần locked tiếp theo</b><p class="muted" style="font-size:11px;margin:0">Chọn — để bỏ qua Tắt hoặc Bật. Chỉ bật: chờ một FS cùng nhóm locked.</p><div class="fs-preset-row"><b class="fs-preset-group">Collection</b><label>Tắt <select id="preset-source-99-153"><option value="">—</option><option value="FS01">FS01</option><option value="FS02">FS02</option><option value="FS03">FS03</option><option value="FS04">FS04</option></select></label><label>Bật <select id="preset-target-99-153"><option value="">—</option><option value="FS01">FS01</option><option value="FS02">FS02</option><option value="FS03">FS03</option><option value="FS04">FS04</option></select></label><button id="preset-save-99-153" class="fs-preset-save">Lưu</button><button id="preset-clear-99-153" class="fs-preset-clear">Hủy</button><span id="preset-status-99-153" class="fs-preset-status" role="status"></span></div><div class="fs-preset-row"><b class="fs-preset-group">Sale</b><label>Tắt <select id="preset-source-99-155"><option value="">—</option><option value="FS05">FS05</option><option value="FS06">FS06</option><option value="FS07">FS07</option></select></label><label>Bật <select id="preset-target-99-155"><option value="">—</option><option value="FS05">FS05</option><option value="FS06">FS06</option><option value="FS07">FS07</option></select></label><button id="preset-save-99-155" class="fs-preset-save">Lưu</button><button id="preset-clear-99-155" class="fs-preset-clear">Hủy</button><span id="preset-status-99-155" class="fs-preset-status" role="status"></span></div></div><div id="fs-switch-plans"></div><button id="fs-switch-release" class="secondary" hidden>Đã kiểm tra thủ công · mở khóa</button></div>
+    </div>
+  </div>
+</header>
+<main>
+  <div id="summary"></div>
+  <div id="confirmation-status" role="status" aria-live="polite"></div>
+  <div id="confirmations"></div>
+  <div class="card" id="fs-node-controls"><b>BẬT / TẮT FS</b><p class="muted">Xanh: đang hoạt động · Đỏ: đang tắt · Xám: chưa xác minh</p><div id="fs-node-buttons"></div></div>
+  <div id="groups"></div>
+
+
+  <div class="card"><b>THỐNG KÊ VÀ LỊCH SỬ · Supabase</b><div id="fs-switch-status" role="status"></div>
+    <p><label>Ngày (giờ Việt Nam): <input type="date" id="history-date"></label> <button id="history-all" class="secondary">Tất cả ngày</button></p>
+    <p id="history-sync-status" class="muted" role="status" style="font-size:12px"></p><div id="history-stats"></div><div id="history-logs"></div>
+    <div class="history-pagination"><span id="history-page" class="muted" aria-live="polite"></span>
+      <nav id="history-pages" aria-label="Trang lịch sử"></nav>
+      <form id="history-jump-form"><label for="history-jump">Tới trang</label><input id="history-jump" type="number" min="1" step="1" required placeholder="Số trang"><button type="submit" class="secondary">Đi</button></form>
+    </div>
+  </div>
+</main>
+<dialog id="block-dialog" aria-labelledby="block-title"><h2 id="block-title">Kiểm tra trước khi BLOCK</h2><div id="block-details"></div><div class="dialog-actions"><button id="block-later" class="secondary">Để sau</button><button id="block-cancel" class="secondary">Hủy</button><button id="block-confirm" class="off">Xác nhận ACTIVE → BLOCKED</button></div></dialog>
+<dialog id="auto-mode-dialog" aria-labelledby="auto-mode-title"><h2 id="auto-mode-title">Bật BLOCK tự động?</h2><p>Khi AUTO BLOCK ON, FS có VT tụt theo baseline và CDR đủ 5/5 sẽ được đổi ACTIVE → BLOCKED ngay, không hỏi xác nhận từng lần. Những sự cố đang chờ xác nhận cũng được xử lý.</p><p>Giữ lịch nghỉ, kiểm tra đúng FS/profile và khóa một thao tác mỗi sự cố. Bạn có thể chuyển về Xác nhận tay bất cứ lúc nào.</p><div class="dialog-actions"><button id="auto-mode-cancel" class="secondary">Giữ xác nhận tay</button><button id="auto-mode-confirm" class="off">Bật tự động</button></div></dialog>
+<dialog id="fs-node-dialog"><h2>Bật / tắt FS</h2><div id="fs-node-details"></div><div class="dialog-actions"><button id="fs-node-cancel" class="secondary">Hủy</button><button id="fs-node-confirm">Save + Reload on Server</button></div></dialog>
+<dialog id="fs-switch-confirm"><h2>Xác nhận chuyển FS</h2><div id="fs-switch-details"></div><div class="dialog-actions"><button id="fs-switch-cancel" class="secondary">Hủy</button><button id="fs-switch-execute" class="off">Thực hiện</button></div></dialog>
+<dialog id="fs-switch-automatic"><h2>Bật Thay FS tự động?</h2><p>Khi Thay FS ON, hệ thống tắt nguồn, bật đích sau xác minh OpenSIPS và BLOCK số ACTIVE của đích theo quy tắc cũ, không hỏi từng lượt.</p><div class="dialog-actions"><button id="fs-switch-auto-cancel" class="secondary">Hủy</button><button id="fs-switch-auto-confirm" class="off">Bật tự động</button></div></dialog>
+<dialog id="clear-history-dialog"><h2>Xóa log theo thời gian</h2><p>Chỉ xóa log trong ngày và khung giờ được chọn (giờ Việt Nam).</p><p><label>Ngày <input type="date" id="clear-history-date" required></label></p><p><label>Từ <input type="time" id="clear-history-start" value="00:00" required></label> <label>Đến <input type="time" id="clear-history-end" value="23:59" required></label></p><p id="clear-history-error" class="bad"></p><div class="dialog-actions"><button id="clear-history-cancel" class="secondary">Hủy</button><button id="clear-history-confirm" class="off">Xóa log đã chọn</button></div></dialog>
+<script src="config.js"></script><script src="adapter.js"></script><script src="fs-switch.js"></script><script src="dashboard.js"></script><script src="dashboard-fs-switch.js"></script>
+</body></html>
