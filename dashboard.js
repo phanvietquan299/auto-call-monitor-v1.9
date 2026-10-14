@@ -189,6 +189,7 @@ async function render(){
   const sequence=++renderSequence;
   const s=await getState(); if(!s||sequence!==renderSequence||confirmationBusy)return;
   if(!autoModeDialog.open)document.querySelector('#auto-block-mode').value=s.autoBlockMode||'MANUAL';
+  document.querySelector('#remote-sync-status').textContent=s.remoteSync?.error?'Đồng bộ điện thoại: '+s.remoteSync.error:'';
   const toggle=document.querySelector("#toggle");
   const auto=document.querySelector("#auto");
   auto.textContent=s.autoEnabled?"AUTO BLOCK: ON":"AUTO BLOCK: OFF";
