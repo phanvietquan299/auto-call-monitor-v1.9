@@ -13,10 +13,16 @@ function manualStatusControl(s,fs,profile){
  const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
  const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
  const fresh=Date.now()-(row?.updatedAt||s.freeswitch?.updatedAt||0)<45000;
- if(!row)return `<div class="fs-phone-status muted"><span>Chờ số điện thoại</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" disabled><option value="" selected>Chờ cập nhật số…</option><option value="ACTIVE">⚪ ACTIVE</option><option value="BACKUP">🔵 BACKUP</option><option value="BLOCKED">🔴 BLOCKED</option></select></div>`;
+ if(!row)return `<div class="fs-phone-status muted"><span>Chờ số điện thoại</span><button class="secondary" data-refresh-phone="${esc(fs)}">Đọc lại số</button><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" disabled><option value="" selected>Chờ cập nhật số…</option><option value="ACTIVE">⚪ ACTIVE</option><option value="BACKUP">🔵 BACKUP</option><option value="BLOCKED">🔴 BLOCKED</option></select></div>`;
  const busy=manualStatusBusy.has(fs),active=fsRoutingActive(s,fs,profile);
- return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':!fresh?'<small class="muted">Sẽ kiểm tra lại số khi đổi</small>':''}</div>`;
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':!fresh?'<small class="muted">Sẽ kiểm tra lại số khi đổi</small>':''}</div>`;
 }
+document.querySelector('#groups').addEventListener('click',async event=>{
+ const button=event.target.closest('[data-refresh-phone]');if(!button)return;
+ button.disabled=true;confirmationNotice('Đang đọc lại số từ FreeSWITCH…');
+ try{const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs:button.dataset.refreshPhone,refresh:true});if(!result?.ok)throw Error(result?.error||'Chưa đọc được số.');confirmationNotice('Đã đọc lại số FreeSWITCH.');}
+ catch(error){confirmationNotice(error.message);}finally{button.disabled=false;render().catch(()=>{});}
+});
 document.querySelector('#groups').addEventListener('change',async event=>{
  const select=event.target.closest('[data-phone-status]');if(!select)return;
  const {fs,phone,expected}=select.dataset,status=select.value;
