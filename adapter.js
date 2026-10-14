@@ -2,6 +2,7 @@
 (()=>{
  const project='https://ygxifobrqndflyeupxhj.supabase.co';
  const config=globalThis.MobileConfig;
+ const historyCache=new Map();
  let session=localStorage.getItem('monitor-session')||'',cached,pending,lastRead=0;
  const pause=ms=>new Promise(r=>setTimeout(r,ms));
  const login=document.getElementById('mobile-login');
@@ -26,9 +27,10 @@
   if(message.type==='GET_STATE'){const data=await state();return {ok:true,state:data?.snapshot?.dashboard||null};}
   if(message.type==='FS_SWITCH_STATE'){const data=await state(),s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
   if(message.type==='HISTORY_READ'){
+   const previous=historyCache.get(message.date||'');if(previous&&Date.now()-previous.at<5000)return previous.result;
    const start=message.date?Date.parse(message.date+'T00:00:00+07:00'):null,events=[];
    for(let offset=0;;offset+=500){const rows=await rpc('history',{start,end:start==null?null:start+86400000,offset});events.push(...rows);if(rows.length<500)break;}
-   return {ok:true,events,sync:{source:'SUPABASE'}};
+   const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.set(message.date||'',{at:Date.now(),result});return result;
   }
   const live=await state();if(!live?.online)return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};
   const queued=await rpc('command',{id:crypto.randomUUID(),command:message});
@@ -36,7 +38,7 @@
   const deadline=Date.now()+120000;
   do{
    await pause(1000);const result=await rpc('result',{id:queued.id});
-   if(result.status==='DONE'){cached=null;const r=result.result||{ok:false,error:'Chưa có kết quả'};return {...r,state:(await state())?.snapshot?.dashboard};}
+   if(result.status==='DONE'){cached=null;historyCache.clear();const r=result.result||{ok:false,error:'Chưa có kết quả'};return {...r,state:(await state())?.snapshot?.dashboard};}
    if(result.status==='EXPIRED'||result.status==='CANCELLED')return {ok:false,error:'Yêu cầu đã hết hạn; chưa thực hiện.'};
   }while(Date.now()<deadline);
   return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
