@@ -6,10 +6,11 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const manualStatusBusy=new Set();
 function manualStatusControl(s,fs,profile){
  const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
- const fresh=Date.now()-(s.freeswitch?.updatedAt||0)<45000;
- if(rows.length!==1||!fresh)return '<div class="fs-phone-status muted">Chờ số ACTIVE</div>';
- const row=rows[0],busy=manualStatusBusy.has(fs);
- return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:'🟢',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
+ const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
+ const fresh=Date.now()-(row?.updatedAt||s.freeswitch?.updatedAt||0)<45000;
+ if(!row)return '<div class="fs-phone-status muted">Chờ số ACTIVE</div>';
+ const busy=manualStatusBusy.has(fs);
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!fresh||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:'🟢',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
 }
 document.querySelector('#groups').addEventListener('change',async event=>{
  const select=event.target.closest('[data-phone-status]');if(!select)return;
