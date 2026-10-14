@@ -363,3 +363,13 @@ mobileLinkButton.onclick=async()=>{
 };
 document.querySelector('#mobile-link-copy').onclick=async()=>{try{await navigator.clipboard.writeText(document.querySelector('#mobile-link-url').value);confirmationNotice('Đã sao chép liên kết đăng nhập');}catch(error){document.querySelector('#mobile-link-url').select();}};
 document.querySelector('#mobile-link-close').onclick=()=>document.querySelector('#mobile-link-dialog').close();
+
+document.querySelector('#mobile-password-open').onclick=()=>document.querySelector('#mobile-password-dialog').showModal();
+document.querySelector('#mobile-password-close').onclick=()=>document.querySelector('#mobile-password-dialog').close();
+document.querySelector('#mobile-password-form').onsubmit=async event=>{
+ event.preventDefault();const first=document.querySelector('#mobile-password-new'),repeat=document.querySelector('#mobile-password-repeat'),error=document.querySelector('#mobile-password-error'),button=document.querySelector('#mobile-password-save');
+ if(first.value!==repeat.value){error.textContent='Hai mật khẩu chưa khớp.';return;}
+ button.disabled=true;error.textContent='Đang lưu…';
+ try{const result=await chrome.runtime.sendMessage({type:'SET_MOBILE_PASSWORD',password:first.value});if(!result?.ok)throw Error(result?.error||'Không lưu được mật khẩu.');first.value='';repeat.value='';error.textContent='';document.querySelector('#mobile-password-dialog').close();confirmationNotice('Đã lưu mật khẩu app điện thoại.');}
+ catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+};

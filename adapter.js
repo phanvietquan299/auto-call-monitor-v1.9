@@ -31,6 +31,7 @@
  })();
  async function sendMessage(message){
   await initial;
+  if(message.type==='SET_MOBILE_PASSWORD')return rpc('set_password',{password:message.password});
   if(message.type==='GET_STATE'){const data=cached||await state();state().catch(()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
   if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
   if(message.type==='HISTORY_READ'){
@@ -74,6 +75,16 @@
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){lastRead=0;state().catch(()=>{});}});
  window.addEventListener('online',()=>{lastRead=0;state().catch(()=>{});});
  poll();
+ const passwordForm=document.getElementById('mobile-password-login-form');
+ if(passwordForm)passwordForm.onsubmit=async event=>{
+  event.preventDefault();const input=document.getElementById('mobile-login-password'),error=document.getElementById('mobile-password-login-error'),button=document.getElementById('mobile-password-login-submit');
+  button.disabled=true;error.textContent='Đang đăng nhập…';
+  try{
+   const auth=await rpc('password_login',{password:input.value},'');
+   if(!auth.ok||!auth.session)throw Error(auth.error||'Không đăng nhập được.');
+   session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;lastRead=0;login.hidden=true;error.textContent='';state().catch(()=>{});
+  }catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+ };
  document.getElementById('mobile-login-form').onsubmit=async event=>{event.preventDefault();const input=document.getElementById('mobile-login-link');let code=input.value.trim();try{if(code.startsWith('https://'))code=new URLSearchParams(new URL(code).hash.slice(1)).get('code')||'';if(!/^[a-f0-9]{64}$/.test(code))throw Error('Dán đúng liên kết đăng nhập do bot gửi');const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}};
  document.getElementById('mobile-logout').onclick=()=>{session='';localStorage.removeItem('monitor-session');cached=null;login.hidden=false;};
  const updateButton=document.getElementById('mobile-update');
