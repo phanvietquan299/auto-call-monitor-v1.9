@@ -15,7 +15,7 @@
   if(!session){login.hidden=false;return null;}
   if(cached&&Date.now()-lastRead<900)return cached;
   if(pending)return pending;
-  pending=rpc('state').then(data=>{cached=data;lastRead=Date.now();const lag=data.at?Math.max(0,Math.round((Date.now()-data.at)/1000)):null;badge.textContent=data.online?`● Máy online · dữ liệu ${lag}s trước`:'● Máy offline · đang xem dữ liệu cũ';badge.className=data.online?'good':'bad';return data;}).catch(error=>{badge.textContent='Mất mạng · dữ liệu có thể đã cũ';badge.className='bad';return cached?{...cached,online:false}:null;}).finally(()=>{pending=null;});return pending;
+  pending=rpc('state').then(data=>{cached=data;lastRead=Date.now();const lag=data.at?Math.max(0,Math.round((Date.now()-(data.snapshot?.capturedAt||data.at))/1000)):null;badge.textContent=data.online?`● Máy online · dữ liệu ${lag}s trước`:'● Máy offline · đang xem dữ liệu cũ';badge.className=data.online?'good':'bad';return data;}).catch(error=>{badge.textContent='Mất mạng · dữ liệu có thể đã cũ';badge.className='bad';if(cached)cached={...cached,online:false};return cached||null;}).finally(()=>{pending=null;});return pending;
  }
  const initial=(async()=>{
   const code=new URLSearchParams(location.hash.slice(1)).get('code');
@@ -24,8 +24,8 @@
  })();
  async function sendMessage(message){
   await initial;
-  if(message.type==='GET_STATE'){const data=await state();return {ok:true,state:data?.snapshot?.dashboard||null};}
-  if(message.type==='FS_SWITCH_STATE'){const data=await state(),s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
+  if(message.type==='GET_STATE'){const data=cached||await state();state().catch(()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
+  if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
   if(message.type==='HISTORY_READ'){
    const previous=historyCache.get(message.date||'');if(previous&&Date.now()-previous.at<5000)return previous.result;
    const start=message.date?Date.parse(message.date+'T00:00:00+07:00'):null,events=[];
@@ -44,6 +44,10 @@
   return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
  }
  globalThis.chrome={runtime:{sendMessage}};
+ async function poll(){await initial;if(document.visibilityState!=='hidden'&&session)await state();setTimeout(poll,1000);}
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){lastRead=0;state().catch(()=>{});}});
+ window.addEventListener('online',()=>{lastRead=0;state().catch(()=>{});});
+ poll();
  document.getElementById('mobile-login-form').onsubmit=async event=>{event.preventDefault();const input=document.getElementById('mobile-login-link');let code=input.value.trim();try{if(code.startsWith('https://'))code=new URLSearchParams(new URL(code).hash.slice(1)).get('code')||'';if(!/^[a-f0-9]{64}$/.test(code))throw Error('Dán đúng liên kết đăng nhập do bot gửi');const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}};
  document.getElementById('mobile-logout').onclick=()=>{session='';localStorage.removeItem('monitor-session');cached=null;login.hidden=false;};
  if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');

@@ -324,3 +324,13 @@ document.querySelector('#clear-history-confirm').onclick=async()=>{
 };
 render().catch(()=>confirmationNotice('Không kết nối được extension. Hãy tải lại dashboard.'));
 setInterval(()=>render().catch(()=>{}),1000);
+
+const mobileLinkButton=document.querySelector('#create-mobile-link');
+mobileLinkButton.onclick=async()=>{
+  mobileLinkButton.disabled=true;
+  try{const result=await chrome.runtime.sendMessage({type:'CREATE_MOBILE_LINK'});if(!result?.ok)throw Error(result?.error||'Không tạo được liên kết');document.querySelector('#mobile-link-url').value=result.url;document.querySelector('#mobile-link-dialog').showModal();}
+  catch(error){confirmationNotice(error.message);}
+  finally{mobileLinkButton.disabled=false;}
+};
+document.querySelector('#mobile-link-copy').onclick=async()=>{try{await navigator.clipboard.writeText(document.querySelector('#mobile-link-url').value);confirmationNotice('Đã sao chép liên kết đăng nhập');}catch(error){document.querySelector('#mobile-link-url').select();}};
+document.querySelector('#mobile-link-close').onclick=()=>document.querySelector('#mobile-link-dialog').close();
