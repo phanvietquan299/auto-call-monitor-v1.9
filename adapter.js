@@ -3,6 +3,13 @@
  const project='https://ygxifobrqndflyeupxhj.supabase.co';
  const config=globalThis.MobileConfig;
  const historyCache=new Map();
+ let commandPending=false,noticeTimer;
+ const notice=document.createElement('div');
+ notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
+ notice.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;max-width:90vw;padding:12px 18px;border-radius:12px;background:#243850;color:#fff;box-shadow:0 4px 20px #0006;font-size:14px;pointer-events:none';
+ notice.hidden=true;document.body.appendChild(notice);
+ function commandNotice(text){clearTimeout(noticeTimer);notice.textContent=text;notice.hidden=false;if(!commandPending)noticeTimer=setTimeout(()=>{notice.hidden=true;},5000);}
+
  let session=localStorage.getItem('monitor-session')||'',cached,pending,lastRead=0;
  const pause=ms=>new Promise(r=>setTimeout(r,ms));
  const login=document.getElementById('mobile-login');
@@ -32,16 +39,35 @@
    for(let offset=0;;offset+=500){const rows=await rpc('history',{start,end:start==null?null:start+86400000,offset});events.push(...rows);if(rows.length<500)break;}
    const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.set(message.date||'',{at:Date.now(),result});return result;
   }
-  const live=await state();if(!live?.online)return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};
-  const queued=await rpc('command',{id:crypto.randomUUID(),command:message});
-  badge.textContent='Đang chờ máy xử lý…';
-  const deadline=Date.now()+120000;
-  do{
-   await pause(1000);const result=await rpc('result',{id:queued.id});
-   if(result.status==='DONE'){cached=null;historyCache.clear();const r=result.result||{ok:false,error:'Chưa có kết quả'};return {...r,state:(await state())?.snapshot?.dashboard};}
-   if(result.status==='EXPIRED'||result.status==='CANCELLED')return {ok:false,error:'Yêu cầu đã hết hạn; chưa thực hiện.'};
-  }while(Date.now()<deadline);
-  return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
+  if(commandPending)return {ok:false,error:'Đang xử lý lệnh trước, vui lòng chờ kết quả.'};
+  commandPending=true;commandNotice('Đang gửi yêu cầu tới máy tính…');
+  try{
+   const live=cached&&Date.now()-lastRead<5000?cached:await state();
+   if(!live?.online){commandPending=false;commandNotice('Máy offline. Mở Chrome và extension trên máy.');return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};}
+   const queued=await rpc('command',{id:crypto.randomUUID(),command:message});
+   commandNotice('Đã gửi · đang chờ máy tính xử lý…');
+   const deadline=Date.now()+120000;
+   do{
+    const result=await rpc('result',{id:queued.id});
+    if(result.status==='DONE'){
+     historyCache.clear();lastRead=0;
+     const r=result.result||{ok:false,error:'Chưa có kết quả'};
+     commandPending=false;commandNotice(r.ok?'Đã thực hiện · đang cập nhật dữ liệu':r.error||'Thao tác không thành công');
+     state().catch(()=>{});
+     return {...r,state:cached?.snapshot?.dashboard};
+    }
+    if(result.status==='RUNNING')commandNotice('Máy tính đang thực hiện thao tác…');
+    if(result.status==='EXPIRED'||result.status==='CANCELLED'){
+     commandPending=false;commandNotice('Yêu cầu đã hết hạn; chưa thực hiện.');
+     return {ok:false,error:'Yêu cầu đã hết hạn; chưa thực hiện.'};
+    }
+    await pause(500);
+   }while(Date.now()<deadline);
+   commandPending=false;commandNotice('Chưa có kết quả. Kiểm tra trạng thái trước khi bấm lại.');
+   return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
+  }catch(error){commandPending=false;commandNotice(error.message);throw error;}
+  finally{commandPending=false;}
+
  }
  globalThis.chrome={runtime:{sendMessage}};
  async function poll(){await initial;if(document.visibilityState!=='hidden'&&session)await state();setTimeout(poll,1000);}
