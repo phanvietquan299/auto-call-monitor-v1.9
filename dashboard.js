@@ -4,13 +4,18 @@ async function getState(){
 }
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const manualStatusBusy=new Set();
+function fsRoutingActive(s,fs,profile){
+ const group=profile==='COLLECTION'?'99.153':'99.155',data=s.opensips?.[group];
+ const age=Date.now()-(data?.updatedAt||0),nodes=(data?.nodes||[]).filter(n=>n.fs===fs);
+ return age>=0&&age<45000&&nodes.length===1&&nodes[0].groupId===(group==='99.153'?2:3);
+}
 function manualStatusControl(s,fs,profile){
  const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
  const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
  const fresh=Date.now()-(row?.updatedAt||s.freeswitch?.updatedAt||0)<45000;
  if(!row)return '<div class="fs-phone-status muted">Chờ số ACTIVE</div>';
- const busy=manualStatusBusy.has(fs);
- return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!fresh||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:'🟢',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
+ const busy=manualStatusBusy.has(fs),active=fsRoutingActive(s,fs,profile);
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy||!fresh||!row.hasStatusControl?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
 }
 document.querySelector('#groups').addEventListener('change',async event=>{
  const select=event.target.closest('[data-phone-status]');if(!select)return;
@@ -257,7 +262,7 @@ async function render(){
         !s.monitoringEnabled?'MONITOR đang OFF':n.used>0?
         `FS đang bật; học baseline ${fs.healthyHistory?.length||0}/${s.config.baselineSamples??20} mẫu`:'FS đang bật; chờ VT tăng'):
         rawState==='INACTIVE'&&groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
-      const stateClass=fs.state==="SUSPECTED"?"bad":fs.state==="HEALTHY"?"good":
+      const stateClass=!fsRoutingActive(s,n.fs,g==='99.153'?'COLLECTION':'TELESALE')?"muted":fs.state==="SUSPECTED"?"bad":fs.state==="HEALTHY"?"good":
         fs.state==="WATCHING"?"watching":fs.state==="WARNING"?"warning":
         ["COOLDOWN","RECOVERING"].includes(fs.state)?"cooldown":"muted";
       const manualButton=fs.state==='SUSPECTED'&&fs.incident&&!fs.incident.locked

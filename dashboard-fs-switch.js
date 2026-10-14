@@ -43,7 +43,7 @@
   function renderNodes(){
     const html=Object.entries(FsSwitch.groups).map(([group,policy])=>`<div class="fs-node-group"><strong>${group==='99.153'?'Collection':'Sale'}</strong>${policy.fs.map(fs=>{
       const rows=(snapshot.nodes?.[group]?.nodes||[]).filter(n=>n.fs===fs);
-      const fresh=Date.now()-(snapshot.nodes?.[group]?.updatedAt||0)<45000;
+      const age=Date.now()-(snapshot.nodes?.[group]?.updatedAt||0),fresh=age>=0&&age<45000;
       const id=rows.length===1?rows[0].groupId:null;
       const known=fresh&&[0,policy.groupId].includes(id),active=known&&id===policy.groupId;
       return `<button type="button" data-node-fs="${fs}" data-node-group="${group}" data-node-expected="${id}" class="${known?(active?'on':'off'):'secondary'}" aria-label="${fs}: ${known?(active?'đang hoạt động, bấm để tắt':'đang tắt, bấm để bật'):'chưa xác minh'}" aria-pressed="${active}" ${!known||busy?'disabled':''}>${Number(fs.slice(2))}</button>`;
