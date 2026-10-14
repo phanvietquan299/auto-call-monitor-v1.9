@@ -8,7 +8,7 @@
  const login=document.getElementById('mobile-login');
  const badge=document.getElementById('mobile-connection');
  async function rpc(action,payload={},access=session){
-  const r=await fetch(project+'/rest/v1/rpc/call_monitor_mobile?apikey='+encodeURIComponent(config.anonKey),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:access,p_action:action,p_payload:payload}),signal:AbortSignal.timeout(10000)});
+  const r=await fetch(project+'/rest/v1/rpc/call_monitor_mobile?apikey='+encodeURIComponent(config.anonKey),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:access,p_action:action,p_payload:payload}),signal:AbortSignal.timeout(30000)});
   const data=await r.json();if(!r.ok){if(r.status===401||r.status===403){session='';localStorage.removeItem('monitor-session');login.hidden=false;}throw Error(data.message||'Không kết nối được máy');}return data;
  }
  async function state(){
