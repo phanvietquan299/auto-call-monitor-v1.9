@@ -35,6 +35,32 @@ document.querySelector('#groups').addEventListener('change',async event=>{
  }catch(error){select.value=expected;confirmationNotice(error.message);}
  finally{manualStatusBusy.delete(fs);select.disabled=false;render().catch(()=>{});}
 });
+function importantAlerts(s,now=Date.now()){
+ const out=(s.importantFailures||[]).filter(a=>now-a.at<86400000).map(a=>({...a}));
+ for(const f of Object.values(s.fsStates||{})){
+  const i=f.incident||{},base=`${f.group}|${f.fs}|${i.id||'none'}`;
+  if(i.actionUncertain||(!i.actionPending&&f.actionError&&!i.autoExecuted&&!i.manualExecuted))out.push({id:base+'|failure|'+(f.actionError||''),fs:f.fs,at:i.requestedAt||f.updatedAt,title:i.actionUncertain?'Chưa xác minh được kết quả đổi số':'Không đổi được số',detail:f.actionError||'Kiểm tra trạng thái FreeSWITCH trước khi thử lại.'});
+  const cdr=f.cdr?.decision||f.cdr,switched=i.switchedAt||f.switchedAt;
+  const attempts=new Set([...(i.attemptedPhones||[]),...(i.previousPhone?[i.previousPhone]:[]),...(i.oldPhone?[i.oldPhone]:[])]).size;
+  const cdrAt=cdr?.checkedAt||f.cdr?.checkedAt;
+  const active=f.groupId===(f.group==='99.153'?2:3);
+  if(active&&!s.schedule?.groups?.[f.group]?.paused&&(i.autoExecuted||i.manualExecuted)&&!i.actionPending&&attempts>=2&&switched&&now-switched>=5000&&now-f.updatedAt<=45000&&now-cdrAt<=10000&&cdrAt>switched&&cdr?.newestCallTime>switched&&cdr.locked&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){
+   out.push({id:base+'|no-recovery',fs:f.fs,at:switched,title:`Đã đổi ${attempts} số nhưng FS chưa phục hồi`,detail:`VT hiện tại ${f.currentVt}; CDR mới vẫn báo lỗi liên tiếp. Cần kiểm tra FS/đầu số.`});
+  }
+ }
+ const op=s.fsSwitchOperation;
+ if(op?.status==='FAILED')out.push({id:`rotation|${op.id||op.startedAt||op.finishedAt}|${op.error}`,fs:op.plan?.source?.fs,title:'Thay FS thất bại',at:op.finishedAt||op.startedAt,detail:op.error||'Kiểm tra OpenSIPS/FreeSWITCH trước khi tiếp tục.'});
+ return out;
+}
+let seenImportant=[];
+try{seenImportant=JSON.parse(localStorage.getItem('monitor-important-seen')||'[]');if(!Array.isArray(seenImportant))seenImportant=[];}catch(_){}
+const dismissedImportant=new Set(seenImportant);
+document.querySelector('#summary').addEventListener('click',event=>{
+ const button=event.target.closest('[data-important-dismiss]');if(!button)return;
+ dismissedImportant.add(button.dataset.importantDismiss);
+ try{localStorage.setItem('monitor-important-seen',JSON.stringify([...dismissedImportant].slice(-100)));}catch(_){}
+ button.closest('[data-important-alert]').remove();
+});
 const dismissedCdrWarnings=new Set();
 const cdrWarningKey=w=>`${w.group}|${w.fs}|${w.pattern}|${w.at}`;
 document.querySelector('#summary').onclick=event=>{
@@ -230,6 +256,8 @@ async function render(){
   toggle.textContent=s.monitoringEnabled?"MONITORING: ON":"MONITORING: OFF";
   toggle.className=s.monitoringEnabled?"on":"off";
 
+  const important=importantAlerts(s).filter(a=>!dismissedImportant.has(a.id));
+  const importantMarkup=important.length?`<div class="card bad" role="alert"><b>CẢNH BÁO CẦN XỬ LÝ</b>${important.map(a=>`<div data-important-alert style="padding:12px 0;border-bottom:1px solid #ffffff20"><button type="button" class="secondary" data-important-dismiss="${esc(a.id)}" style="float:right;padding:4px 10px">Đã xem</button><b>${esc(a.fs||'Hệ thống')} · ${esc(a.title)}</b><div>${esc(a.detail)}</div><small class="muted">${a.at?esc(new Date(a.at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})):''}</small></div>`).join('')}</div>`:'';
   const specialWarnings=(s.cdrWarnings||[]).filter(w=>w.at>Date.now()-15000&&!dismissedCdrWarnings.has(cdrWarningKey(w))).slice(0,8);
   const specialMarkup=specialWarnings.length?`<div class="card warning"><b>CẢNH BÁO CDR ĐẶC BIỆT</b>${specialWarnings.map(w=>`<p data-cdr-warning><button type="button" class="secondary" data-dismiss-cdr="${esc(cdrWarningKey(w))}" aria-label="Đóng cảnh báo CDR" style="float:right;padding:2px 10px">×</button><b>${esc(w.fs)} · ${w.group==='99.153'?'Collection':'Sale'}</b> · ${esc(w.ip)}<br><b>${esc(w.pattern)}</b> · ${esc(w.count)} cuộc liên tiếp · ${esc(new Date(w.at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}))}</p>`).join('')}</div>`:'';
   const alerts=s.alerts||[];
@@ -241,7 +269,7 @@ async function render(){
     if(!g?.paused)return '';
     return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–09:00`:`tạm nghỉ ${esc(g.startAt)}–13:00`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?'Vẫn đọc Group ID/CDR. Đến 09:00 đánh giá CDR mới; MONITORING tắt tay vẫn giữ OFF.':'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
   }).join('');
-  document.querySelector("#summary").innerHTML=specialMarkup+pauseNotice+(alerts.length
+  document.querySelector("#summary").innerHTML=importantMarkup+specialMarkup+pauseNotice+(alerts.length
     ? `<div class="card bad"><b>${s.config?.cdrVerificationEnabled?'CDR XÁC NHẬN NGHI BLOCK':'SUSPECTED BLOCK'}</b>${alerts.map(a=>`<div>${esc(a.group)} → ${esc(a.fs)} (${esc(a.ip)})${a.actionPending?' · Đang đổi, chưa hoàn tất':a.actionUncertain?' · Chưa xác minh BLOCKED, cần kiểm tra':''}${s.processingStatus?.[`${a.group}|${a.fs}|${a.ip}`]?`<br>${esc(s.processingStatus[`${a.group}|${a.fs}|${a.ip}`])}`:''}</div>`).join("")}${s.autoEnabled
       ? `<div class="action-note">${s.autoBlockMode==='AUTOMATIC'?'AUTO BLOCK: tự đổi ACTIVE → BLOCKED khi đủ điều kiện.':'AUTO BLOCK: chờ bạn kiểm tra và xác nhận trước khi đổi ACTIVE → BLOCKED.'}</div>`
       : `<div class="action-note">${s.config?.cdrVerificationEnabled?'AUTO BLOCK OFF. Chỉ đổi số khi VT tụt theo baseline và CDR đủ 5 cuộc liên tiếp 480-0-0 / 480-1-0.':'ACTION REQUIRED: change the matching FreeSWITCH number from ACTIVE to BLOCKED manually.'}</div>`}</div>`
