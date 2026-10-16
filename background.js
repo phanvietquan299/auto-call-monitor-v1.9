@@ -25,7 +25,7 @@ const DEFAULT_STATE = {
 };
 
 async function getState() {
-  const r = await chrome.storage.local.get(["state","fsSwitch"]);
+  const r = await chrome.storage.local.get(["state","fsSwitch","remoteSync"]);
   if(!r.state) return structuredClone(DEFAULT_STATE);
   const base=structuredClone(DEFAULT_STATE);
   const state={
@@ -34,7 +34,7 @@ async function getState() {
     grafana:{...base.grafana,...(r.state.grafana||{})},
     opensips:{...base.opensips,...(r.state.opensips||{})},
     config:{...base.config,...(r.state.config||{}),baselineSamples:Detection.CONFIG.baselineSamples,sampleIntervalMs:Detection.CONFIG.sampleIntervalMs,groupObserveMs:Detection.CONFIG.groupObserveMs,cdrObservationEnabled:true,cdrRequireVtDrop:r.state.config?.detectionSource==="VT"?false:(r.state.config?.cdrRequireVtDrop??true),detectionSource:r.state.config?.detectionSource||"CDR",cdrVerificationEnabled:(r.state.config?.detectionSource||"CDR")==="CDR",staleMs:45000,sampleGapMs:75000,
-      scheduledPauseStartMinute:700,
+      workdayStartMinute:480,scheduledPauseStartMinute:700,
       backupBlockWaitMs:5000,
       freeSwitchActionGapMs:3000,freeSwitchAutomaticGapMs:3000}
   };
@@ -59,6 +59,7 @@ async function getState() {
   if(typeof HistoryDB!=='undefined')await HistoryDB.append(state.events);
   const retained=(state.events||[]).slice(0,200);
   state.events=retained;
+  state.remoteSync=r.remoteSync||{};
   state.fsSwitchEnabled=!!r.fsSwitch?.enabled;
   state.rotationBarriers=Detection.rotationBarriers(r.fsSwitch);
   return state;
@@ -89,6 +90,38 @@ function nextFreeSwitchAt(state,group){
 async function waitForFreeSwitch(state,group){
   const delay=Math.max(0,nextFreeSwitchAt(state,group)-Date.now());
   if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+}
+// Keep one selected phone per FS independently of the inventory page filter.
+function updateDisplayNumbers(previous,rows,now,pins={}){
+  const display={...(previous||{})};
+  for(const fs of ['FS01','FS02','FS03','FS04','FS05','FS06','FS07']){
+    const profile=Number(fs.slice(2))<=4?'COLLECTION':'TELESALE';
+    const scoped=rows.filter(n=>n.fs===fs&&n.profile===profile);
+    const old=display[fs],pinned=pins[fs];
+    const current=scoped.find(n=>n.phone===(pinned||old?.phone));
+    const active=scoped.filter(n=>n.status==='ACTIVE');
+    let chosen;
+    if(current?.status==='BACKUP'&&(pinned||old?.phone===current.phone))chosen=current;
+    else if(active.length===1)chosen=active[0];
+    else if(current&&current.status!=='BLOCKED')chosen=current;
+    if(chosen)display[fs]={...chosen,updatedAt:now};
+    else if(current?.status==='BLOCKED')delete display[fs];
+  }
+  return display;
+}
+async function readManualFreeSwitch(tabId,fs,profile,phone,expectedStatus){
+ const read=()=>chrome.tabs.sendMessage(tabId,{type:'READ_FS_NUMBERS'}).catch(()=>null);
+ const usable=r=>r?.ok&&(r.numbers||[]).some(n=>n.fs===fs&&n.profile===profile&&n.hasStatusControl&&(phone?n.phone===phone&&n.status===expectedStatus:n.status==='ACTIVE'));
+ let result=await read();
+ if(usable(result))return result;
+ // Refresh only before dispatching a write, never retry an uncertain status change.
+ await chrome.tabs.reload(tabId);
+ const deadline=Date.now()+10000;
+ do{
+   await new Promise(resolve=>setTimeout(resolve,500));
+   result=await read();if(usable(result))return result;
+ }while(Date.now()<deadline);
+ return result;
 }
 let statusWriteInProgress=false;
 async function sendFreeSwitchStatus(state,tabId,payload,automatic=false){
@@ -251,7 +284,7 @@ async function autoBlockNewAlerts(state) {
 }
 
 let messageQueue=Promise.resolve();
-chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
+function handleMainMessage(msg,sender,sendResponse){
   if(msg.type?.startsWith('FS_SWITCH_'))return;
   if(msg.type==='HISTORY_READ'&&typeof CloudHistory!=='undefined'){
     if(msg.date&&!/^\d{4}-\d{2}-\d{2}$/.test(msg.date)){sendResponse({ok:false,error:'Ngày không hợp lệ'});return;}
@@ -275,10 +308,52 @@ chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
           (Detection.manualCdrProof(state,f)||Detection.groupActionGate(state,f,Date.now()).ready);
       });
       Detection.refreshAlerts(state,Date.now());
-      processingStatus(state,await rotationFeature());
+      const feature=await rotationFeature();state.fsSwitchOperation=feature.operation;
+      processingStatus(state,feature);
       await saveState(state);
       sendResponse({ok:true,state});
       return;
+    }
+
+    if(msg.type==='MANUAL_FS_STATUS'){
+      const fs=String(msg.fs||''),profile=Number(fs.slice(2))<=4?'COLLECTION':'TELESALE';
+      if(!/^FS0[1-7]$/.test(fs)||(!msg.refresh&&(!['ACTIVE','BACKUP','BLOCKED'].includes(msg.status)||!['ACTIVE','BACKUP','BLOCKED'].includes(msg.expectedStatus)||!msg.phone))){sendResponse({ok:false,error:'Số hoặc trạng thái không hợp lệ.'});return;}
+      await waitForFreeSwitch(state);
+      const tabs=await chrome.tabs.query({url:'http://10.10.101.67:5003/*'});
+      if(tabs.length!==1||!tabs[0].id){sendResponse({ok:false,error:'Cần mở đúng một tab FreeSWITCH.'});return;}
+      // Re-read after queued automatic actions; never apply a click to a replacement phone.
+      const read=await readManualFreeSwitch(tabs[0].id,fs,profile,msg.refresh?null:msg.phone,msg.expectedStatus);
+      if(msg.refresh){
+        if(read?.ok){const previous=state.freeswitch.numbers||[];state.freeswitch={...state.freeswitch,numbers:read.numbers,updatedAt:Date.now(),displayNumbers:updateDisplayNumbers(state.freeswitch.displayNumbers,read.numbers,Date.now(),state.freeswitch.displayPins)};Detection.observeManualSwaps(state,read.numbers,Date.now(),previous);await saveState(state);}
+        const ready=(read?.numbers||[]).some(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE'&&n.hasStatusControl);
+        sendResponse({ok:!!ready,error:ready?null:'Chưa có số ACTIVE hoặc FreeSWITCH chưa sẵn sàng.'});return;
+      }
+      const rows=(read?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.phone===msg.phone&&n.status===msg.expectedStatus&&n.hasStatusControl);
+      if(!read?.ok||rows.length!==1){sendResponse({ok:false,error:'Số hoặc trạng thái đã thay đổi. Chờ cập nhật rồi thử lại.'});return;}
+      let result;
+      try{result=await sendFreeSwitchStatus(state,tabs[0].id,{type:'MANUAL_FS_STATUS',fs,profile,phone:msg.phone,expectedStatus:msg.expectedStatus,status:msg.status});}
+      catch(error){result={ok:false,error:String(error)};}
+      if(result?.ok){
+        const pins={...(state.freeswitch.displayPins||{})};
+        if(msg.status==='BACKUP')pins[fs]=msg.phone;else delete pins[fs];
+        const displayNumbers={...(state.freeswitch.displayNumbers||{})};
+        if(msg.status==='BLOCKED')delete displayNumbers[fs];
+        else displayNumbers[fs]={...rows[0],status:msg.status,updatedAt:Date.now()};
+        state.freeswitch={...state.freeswitch,displayNumbers,displayPins:pins};
+        if(msg.expectedStatus==='ACTIVE'&&msg.status==='BLOCKED'){
+          const node=Object.values(state.fsStates||{}).find(f=>f.fs===fs&&f.group===(profile==='COLLECTION'?'99.153':'99.155'));
+          if(node)Detection.recordManualSwap(state,node,Date.now(),`${msg.phone} ACTIVE → BLOCKED trên tool`);
+        }
+        const latest=await chrome.tabs.sendMessage(tabs[0].id,{type:'READ_FS_NUMBERS'}).catch(()=>null);
+        if(latest?.ok){const previous=state.freeswitch.numbers||[];state.freeswitch={...state.freeswitch,numbers:latest.numbers,updatedAt:Date.now(),displayNumbers:updateDisplayNumbers(state.freeswitch.displayNumbers,latest.numbers,Date.now(),state.freeswitch.displayPins)};Detection.observeManualSwaps(state,latest.numbers,Date.now(),previous);}
+        state.events.unshift({type:'MANUAL_FS_STATUS',at:Date.now(),fs,group:profile==='COLLECTION'?'99.153':'99.155',phone:msg.phone,detail:`${msg.phone}: ${msg.expectedStatus} → ${msg.status}`});
+        await saveState(state);
+      }
+      if(!result?.ok){
+        const at=Date.now();state.importantFailures=[{id:`manual|${fs}|${at}`,fs,at,title:'Đổi trạng thái số thất bại',detail:result?.error||'Chưa xác minh được trạng thái FreeSWITCH.'},...(state.importantFailures||[])].slice(0,20);
+        await saveState(state);
+      }
+      sendResponse(result||{ok:false,error:'Chưa xác minh được trạng thái.'});return;
     }
 
     if(msg.type==='PREVIEW_TEST_BLOCK_FS01'||msg.type==='CONFIRM_TEST_BLOCK_FS01'){
@@ -444,10 +519,29 @@ chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
       // Preserve display counts when a filtered/empty inventory arrives. This cache is not ACTIVE evidence.
       for(const row of msg.data?.numbers||[])if(row.status==='BACKUP'&&backupCounts[row.fs]?.source!=='SUMMARY')
         backupCounts[row.fs]={count:msg.data.numbers.filter(n=>n.fs===row.fs&&n.profile===row.profile&&n.status==='BACKUP').length,updatedAt:at,source:'INVENTORY'};
-      state.freeswitch={...msg.data,backupCounts,updatedAt:at};
+      const displayPins=state.freeswitch.displayPins||{};
+      const displayNumbers=updateDisplayNumbers(state.freeswitch.displayNumbers,msg.data?.numbers||[],at,displayPins);
+      state.freeswitch={...msg.data,backupCounts,updatedAt:at,displayNumbers,displayPins};
       Detection.observeManualSwaps(state,state.freeswitch.numbers||[],Date.now(),previous);
     }
 
+    if(msg.type==='SET_MOBILE_PASSWORD'){
+      const config=globalThis.SupabaseHistoryConfig;
+      if(!config){sendResponse({ok:false,error:'Chưa có cấu hình Supabase.'});return;}
+      const response=await fetch(config.url+'/rest/v1/rpc/call_monitor_mobile?apikey='+encodeURIComponent(config.anonKey),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:config.historyToken,p_action:'set_password',p_payload:{password:msg.password}}),signal:AbortSignal.timeout(30000)});
+      const result=await response.json();sendResponse(response.ok?result:{ok:false,error:result.message||'Không lưu được mật khẩu.'});return;
+    }
+    if(msg.type==='CREATE_MOBILE_LINK'){
+      const config=globalThis.SupabaseHistoryConfig;
+      if(!config){sendResponse({ok:false,error:'Chưa có cấu hình Supabase trên máy'});return;}
+      const code=crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'');
+      const response=await fetch(config.url+'/rest/v1/rpc/call_monitor_mobile_link',{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:config.historyToken,p_code:code}),signal:AbortSignal.timeout(10000)});
+      if(!response.ok){sendResponse({ok:false,error:'Không tạo được liên kết đăng nhập app'});return;}
+      sendResponse({ok:true,url:'https://phanvietquan299.github.io/auto-call-monitor-v1.9/#code='+code});return;
+    }
+    if(msg.type==='DISMISS_CDR_WARNING'){
+      state.cdrWarnings=(state.cdrWarnings||[]).filter(w=>w.fs!==msg.fs);await saveState(state);sendResponse({ok:true});return;
+    }
     if(msg.type==='HISTORY_READ'){
       if(typeof HistoryDB==='undefined'){sendResponse({ok:true,events:state.events});return;}
       if(msg.date&&!/^\d{4}-\d{2}-\d{2}$/.test(msg.date)){sendResponse({ok:false,error:'Ngày không hợp lệ'});return;}
@@ -475,7 +569,8 @@ chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
     sendResponse({ok:true,state});
   }).catch(e=>sendResponse({ok:false,error:String(e)}));
   return true;
-});
+}
+chrome.runtime.onMessage.addListener(handleMainMessage);
 
 // Open/focus the dashboard as a normal Chrome tab.
 chrome.action.onClicked.addListener(async()=>{
@@ -525,3 +620,5 @@ chrome.runtime.onStartup.addListener(()=>{ensureOpenSipsAlarm().catch(()=>{});})
 ensureOpenSipsAlarm().catch(()=>{});
 
 importScripts("cdr-worker.js", "fs-switch-worker.js");
+
+try{importScripts("telegram-worker.js");}catch(error){console.warn("Telegram bridge unavailable");}

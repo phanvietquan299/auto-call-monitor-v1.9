@@ -1,3 +1,43 @@
+1.17.17: Collection/Sale kết thúc nghỉ qua đêm lúc 08:00 giờ Việt Nam thay vì 09:00. Nâng cấu hình đã lưu sang giờ mới; giữ lịch nghỉ trưa, giờ kết thúc ngày và MONITORING tắt tay.
+
+1.17.16: Mục Cảnh báo cần xử lý trên app/tool: lỗi đổi số/kết quả chưa xác minh, thay FS thất bại, đã đổi >=2 số nhưng VT không tăng và CDR mới vẫn lỗi sau 5s. Có Đã xem, không hiện các lần đổi thành công trong mục cảnh báo.
+
+1.17.15: Bỏ dòng nhắc kiểm tra lại số dưới ô trạng thái; giữ nguyên xác minh FreeSWITCH trước khi đổi.
+
+1.17.14: Không khóa ô trạng thái vì cờ disabled cũ trên FreeSWITCH. Khi đổi tay, đọc lại và tự refresh tab nếu control chưa sẵn sàng trước khi ghi; không tự retry thao tác đã gửi. Có nút Đọc lại số khi chưa có số ACTIVE.
+
+1.17.13: Ô đổi trạng thái luôn hiện dưới FS ở mọi state, kể cả RECOVERING. Không ẩn khi chờ số ACTIVE; chưa có số hiển thị ô chờ cập nhật. Số đã biết vẫn cho yêu cầu đổi khi cache cũ, backend đọc lại số/trạng thái trước thao tác.
+
+1.17.12: App đăng nhập bằng mật khẩu, phiên lưu 30 ngày. Đặt/đổi mật khẩu từ tool hoặc app đang đăng nhập; bcrypt phía server, giới hạn thử sai, đổi mật khẩu thu hồi các phiên khác. Liên kết một lần vẫn dùng để khởi tạo/khôi phục.
+
+1.17.11: Màu xanh của FS và số ACTIVE chỉ hiện khi Group ID OpenSIPS xác nhận FS đang chạy. FS tắt/chưa xác minh/dữ liệu cũ dùng màu trung tính, vẫn giữ nguyên trạng thái số FreeSWITCH và thao tác đổi tay.
+
+1.17.10: App hiển thị phiên bản và nút Cập nhật app, asset JS theo phiên bản, service worker kiểm tra mạng và dọn cache cũ để nhận giao diện mới. Không cập nhật giữa thao tác đang chờ kết quả.
+
+1.17.9: Giữ số BACKUP được chọn dưới FS, BLOCKED chuyển sang số ACTIVE mới. Cache từng FS độc lập bộ lọc inventory, không chọn ngẫu nhiên từ danh sách BACKUP/BLOCKED; dữ liệu chưa xác minh mới chỉ xem, không cho ghi.
+
+1.17.8: Hiện số ACTIVE và ô ACTIVE/BACKUP/BLOCKED dưới từng FS; đổi tay qua hàng đợi chung, đọc lại đúng số/trạng thái trước thao tác, đồng bộ quan sát thay tay với AUTO BLOCK. Hỗ trợ app điện thoại.
+
+1.17.7: App báo ngay khi gửi/đang xử lý/hoàn tất lệnh. Bỏ đọc trạng thái mạng thừa trước và sau lệnh, kiểm tra kết quả mỗi 500ms, chặn gửi trùng khi đang chờ.
+
+1.17.6: Ô đặt trước Tắt chỉ hiện FS đang chạy, Bật chỉ hiện FS đang tắt theo Group ID mỗi nhóm. Cập nhật theo trạng thái mới, giữ lựa chọn còn hợp lệ; loại dữ liệu cũ/không xác minh.
+
+1.17.5: Xét chuyển FS dùng cùng BACKUP tổng quan mới <=45s như số hiển thị, không đếm nhầm 0 khi lọc ACTIVE. Tổng quan cũ không cho tự chuyển dựa trên 0 giả; vẫn yêu cầu đúng một ACTIVE và Group ID/VT/CDR/lịch nghỉ.
+
+1.17.4: Đồng bộ bỏ cdr.traffic.observed nội bộ (~400KB/gói cũ), chỉ 3 dòng CDR và trạng thái cần hiển thị. Publish 2s, timeout30s, không chồng request. Claim command chỉ device ID, không gửi trùng snapshot. Hoàn tất RPC trực tiếp không phụ thuộc Telegram.
+
+1.17.3: Kết quả lệnh lưu trực tiếp RPC Supabase, thông báo Telegram riêng best-effort; Telegram lỗi không chặn command kế tiếp/app kết quả. Kiểm thử mobile enqueue/claim/result và transport thực tế, không thao tác FS thật trong kiểm thử.
+
+1.17.2: Request remote/mobile kèm public apikey ở header và URL fallback, kiểm tra key và lưu remoteSync lỗi/lastPublishedAt để dashboard hiển thị lỗi thật; không đưa PAT/history token vào URL.
+
+1.17.1: Tách publish snapshot khỏi command, vẫn gửi khi đang đổi FS/chờ kết quả Telegram. App đọc state trong nền một request/lượt, render dùng cache tức thì tránh renderSequence bỏ mọi frame khi mạng >1s. Tự đọc lại sau lỗi/online/quay lại app. Telegram chỉ cấp đăng nhập, không là đường truyền dữ liệu.
+
+1.17.0: PWA iPhone/macOS dùng cùng dashboard HTML/JS, transport remote qua Supabase, snapshot máy 1s. Telegram /app cấp link một lần 5 phút; phiên mobile 12h; chỉ public anon key trong frontend. Mobile command queue cùng handler desktop, không chạy lại khi kết quả chưa rõ. GitHub Pages gh-pages chỉ mobile assets, không secrets. Máy cần reload extension để cung cấp dashboard snapshot.
+
+1.16.1: Telegram /menu mở dashboard nhóm Col/Sale, nút Monitor/Block/Thay FS + mode, ngưỡng và wizard đặt FS. Callback sửa tin hiện tại, không trôi chat; log thông báo Việt hóa, không lặp menu dài dưới mỗi cảnh báo.
+
+1.16.0: Telegram bot CallCenter16725bot qua Supabase Edge Function + hàng đợi lệnh riêng. Chỉ chat/user cấu hình, webhook secret, mọi thay đổi cần xác nhận 90s, command claim một lần không retry thao tác khi kết quả mơ hồ. Máy online poll 5s/alarm 30s. Menu/status/CDR/cảnh báo/log/thống kê, Monitor/BLOCK/Thay FS hai mode, ngưỡng, bật/tắt, đặt riêng/cặp, Reload, xác nhận/hủy/recheck/ack/report/release/xóa log. Bot token chỉ secrets backend. Người dùng phải Start bot để nhận tin.
+
 1.15.1: Lịch sử chính lưu PostgreSQL Supabase project callcenter qua RPC có mã truy cập giới hạn lịch sử. PAT/service_role không vào extension. IndexedDB là outbox/offline và tự di chuyển log cũ; retry 15s/alarm 30s, không chặn thao tác realtime bởi mạng. Xóa phải kết nối Supabase, không xóa local khi server lỗi. supabase-config.js local bị ignore; cần giữ file khi tải extension. Chưa triển khai giao diện/điều khiển điện thoại.
 
 1.15.0: Lịch sử thành công lưu IndexedDB auto-call-history, không tự xóa. Di chuyển log còn trong storage sang DB; state realtime giữ tối đa 200 sự kiện. Lọc ngày/xóa thời gian đọc DB, bảng phân trang giữ nguyên. DB local, chưa đồng bộ server; gỡ extension có thể mất dữ liệu.

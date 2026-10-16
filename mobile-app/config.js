@@ -1,0 +1,1 @@
+globalThis.MobileConfig={"anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlneGlmb2JycW5kZmx5ZXVweGhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5MzcxMjYsImV4cCI6MjEwNzUxMzEyNn0.mlaPzAPVMgOehQU0k-g7fv2YVEYSBg3yBweCqGNnHWI"};

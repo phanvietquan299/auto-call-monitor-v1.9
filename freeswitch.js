@@ -45,7 +45,12 @@
 
   chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg.type==="READ_FS_NUMBERS"){sendResponse({ok:true,numbers:parseNumbers()});return;}
-    if(msg.type!=="AUTO_BLOCK_FS") return;
+    if(!['AUTO_BLOCK_FS','MANUAL_FS_STATUS'].includes(msg.type)) return;
+    const manual=msg.type==='MANUAL_FS_STATUS';
+    const expectedStatus=manual?msg.expectedStatus:'ACTIVE',nextStatus=manual?msg.status:'BLOCKED';
+    if(!['ACTIVE','BACKUP','BLOCKED'].includes(expectedStatus)||!['ACTIVE','BACKUP','BLOCKED'].includes(nextStatus)){
+      sendResponse({ok:false,attempted:false,error:'Trạng thái không hợp lệ'});return;
+    }
 
     const fs=String(msg.fs||"").toUpperCase();
     const profile=String(msg.profile||"").toUpperCase();
@@ -61,14 +66,14 @@
       const rowProfile=(td[2].innerText||"").trim().toUpperCase();
       const status=(td[3].querySelector("select")?.value||"").trim().toUpperCase();
       const select=td[3].querySelector("select");
-      if(rowFs===fs && rowProfile===profile && status==="ACTIVE"){
+      if(rowFs===fs && rowProfile===profile && status===expectedStatus && (!manual||phone===expectedPhone)){
         matches.push({tr,phone,select});
       }
     }
 
     // Fail closed: exactly one ACTIVE number must match the target FS/profile.
     if(matches.length!==1){
-      sendResponse({ok:false,attempted:false,errorCode:'ACTIVE_COUNT',error:`Expected exactly 1 ACTIVE ${profile} number for ${fs}; found ${matches.length}`});
+      sendResponse({ok:false,attempted:false,errorCode:'ACTIVE_COUNT',error:`Expected exactly 1 ${expectedStatus} ${profile} number for ${fs}; found ${matches.length}`});
       return;
     }
 
@@ -76,9 +81,9 @@
     if(!expectedPhone||target.phone!==expectedPhone||!target.select){
       sendResponse({ok:false,attempted:false,errorCode:"TARGET_CHANGED",error:"ACTIVE phone changed or status control missing"});return;
     }
-    const blocked=[...target.select.options].find(o=>o.value.toUpperCase()==='BLOCKED');
+    const blocked=[...target.select.options].find(o=>o.value.toUpperCase()===nextStatus);
     if(!blocked||target.select.disabled){
-      sendResponse({ok:false,attempted:false,errorCode:"STATUS_UNAVAILABLE",error:"BLOCKED status unavailable"});return;
+      sendResponse({ok:false,attempted:false,errorCode:"STATUS_UNAVAILABLE",error:`${nextStatus} status unavailable`});return;
     }
     // Use the page's existing status-change handler. Do not invoke swap.
     target.select.value=blocked.value;
@@ -89,11 +94,11 @@
       if(finished)return;
       const numbers=parseNumbers();
       const old=numbers.find(n=>n.phone===target.phone&&n.fs===fs&&n.profile===profile);
-      if(old?.status==='BLOCKED'||Date.now()>=deadline){
+      if(old?.status===nextStatus||Date.now()>=deadline){
         finished=true;if(timer!==null)clearInterval(timer);
-        const ok=old?.status==='BLOCKED';
-        sendResponse(ok?{ok:true,attempted:true,phone:target.phone,fs,profile}:
-          {ok:false,attempted:true,errorCode:'STATUS_TIMEOUT',error:'BLOCKED status not observed within 10s; check FreeSWITCH manually'});
+        const ok=old?.status===nextStatus;
+        sendResponse(ok?{ok:true,attempted:true,phone:target.phone,fs,profile,status:nextStatus}:
+          {ok:false,attempted:true,errorCode:'STATUS_TIMEOUT',error:`${nextStatus} status not observed within 10s; check FreeSWITCH manually`});
         publish();
       }
     }

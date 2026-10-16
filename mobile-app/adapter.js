@@ -1,0 +1,101 @@
+/* Reuse the desktop dashboard through a remote transport; no admin credential. */
+(()=>{
+ const project='https://ygxifobrqndflyeupxhj.supabase.co';
+ const config=globalThis.MobileConfig;
+ const historyCache=new Map();
+ let commandPending=false,noticeTimer;
+ const notice=document.createElement('div');
+ notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
+ notice.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;max-width:90vw;padding:12px 18px;border-radius:12px;background:#243850;color:#fff;box-shadow:0 4px 20px #0006;font-size:14px;pointer-events:none';
+ notice.hidden=true;document.body.appendChild(notice);
+ function commandNotice(text){clearTimeout(noticeTimer);notice.textContent=text;notice.hidden=false;if(!commandPending)noticeTimer=setTimeout(()=>{notice.hidden=true;},5000);}
+
+ let session=localStorage.getItem('monitor-session')||'',cached,pending,lastRead=0;
+ const pause=ms=>new Promise(r=>setTimeout(r,ms));
+ const login=document.getElementById('mobile-login');
+ const badge=document.getElementById('mobile-connection');
+ async function rpc(action,payload={},access=session){
+  const r=await fetch(project+'/rest/v1/rpc/call_monitor_mobile?apikey='+encodeURIComponent(config.anonKey),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:access,p_action:action,p_payload:payload}),signal:AbortSignal.timeout(30000)});
+  const data=await r.json();if(!r.ok){if(r.status===401||r.status===403){session='';localStorage.removeItem('monitor-session');login.hidden=false;}throw Error(data.message||'Không kết nối được máy');}return data;
+ }
+ async function state(){
+  if(!session){login.hidden=false;return null;}
+  if(cached&&Date.now()-lastRead<900)return cached;
+  if(pending)return pending;
+  pending=rpc('state').then(data=>{cached=data;lastRead=Date.now();const lag=data.at?Math.max(0,Math.round((Date.now()-(data.snapshot?.capturedAt||data.at))/1000)):null;badge.textContent=data.online?`● Máy online · dữ liệu ${lag}s trước`:'● Máy offline · đang xem dữ liệu cũ';badge.className=data.online?'good':'bad';return data;}).catch(error=>{badge.textContent='Mất mạng · dữ liệu có thể đã cũ';badge.className='bad';if(cached)cached={...cached,online:false};return cached||null;}).finally(()=>{pending=null;});return pending;
+ }
+ const initial=(async()=>{
+  const code=new URLSearchParams(location.hash.slice(1)).get('code');
+  if(code){history.replaceState(null,'',location.pathname);try{const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}}
+  if(session)login.hidden=true;
+ })();
+ async function sendMessage(message){
+  await initial;
+  if(message.type==='SET_MOBILE_PASSWORD')return rpc('set_password',{password:message.password});
+  if(message.type==='GET_STATE'){const data=cached||await state();state().catch(()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
+  if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
+  if(message.type==='HISTORY_READ'){
+   const previous=historyCache.get(message.date||'');if(previous&&Date.now()-previous.at<5000)return previous.result;
+   const start=message.date?Date.parse(message.date+'T00:00:00+07:00'):null,events=[];
+   for(let offset=0;;offset+=500){const rows=await rpc('history',{start,end:start==null?null:start+86400000,offset});events.push(...rows);if(rows.length<500)break;}
+   const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.set(message.date||'',{at:Date.now(),result});return result;
+  }
+  if(commandPending)return {ok:false,error:'Đang xử lý lệnh trước, vui lòng chờ kết quả.'};
+  commandPending=true;commandNotice('Đang gửi yêu cầu tới máy tính…');
+  try{
+   const live=cached&&Date.now()-lastRead<5000?cached:await state();
+   if(!live?.online){commandPending=false;commandNotice('Máy offline. Mở Chrome và extension trên máy.');return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};}
+   const queued=await rpc('command',{id:crypto.randomUUID(),command:message});
+   commandNotice('Đã gửi · đang chờ máy tính xử lý…');
+   const deadline=Date.now()+120000;
+   do{
+    const result=await rpc('result',{id:queued.id});
+    if(result.status==='DONE'){
+     historyCache.clear();lastRead=0;
+     const r=result.result||{ok:false,error:'Chưa có kết quả'};
+     commandPending=false;commandNotice(r.ok?'Đã thực hiện · đang cập nhật dữ liệu':r.error||'Thao tác không thành công');
+     state().catch(()=>{});
+     return {...r,state:cached?.snapshot?.dashboard};
+    }
+    if(result.status==='RUNNING')commandNotice('Máy tính đang thực hiện thao tác…');
+    if(result.status==='EXPIRED'||result.status==='CANCELLED'){
+     commandPending=false;commandNotice('Yêu cầu đã hết hạn; chưa thực hiện.');
+     return {ok:false,error:'Yêu cầu đã hết hạn; chưa thực hiện.'};
+    }
+    await pause(500);
+   }while(Date.now()<deadline);
+   commandPending=false;commandNotice('Chưa có kết quả. Kiểm tra trạng thái trước khi bấm lại.');
+   return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
+  }catch(error){commandPending=false;commandNotice(error.message);throw error;}
+  finally{commandPending=false;}
+
+ }
+ globalThis.chrome={runtime:{sendMessage}};
+ async function poll(){await initial;if(document.visibilityState!=='hidden'&&session)await state();setTimeout(poll,1000);}
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){lastRead=0;state().catch(()=>{});}});
+ window.addEventListener('online',()=>{lastRead=0;state().catch(()=>{});});
+ poll();
+ const passwordForm=document.getElementById('mobile-password-login-form');
+ if(passwordForm)passwordForm.onsubmit=async event=>{
+  event.preventDefault();const input=document.getElementById('mobile-login-password'),error=document.getElementById('mobile-password-login-error'),button=document.getElementById('mobile-password-login-submit');
+  button.disabled=true;error.textContent='Đang đăng nhập…';
+  try{
+   const auth=await rpc('password_login',{password:input.value},'');
+   if(!auth.ok||!auth.session)throw Error(auth.error||'Không đăng nhập được.');
+   session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;lastRead=0;login.hidden=true;error.textContent='';state().catch(()=>{});
+  }catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+ };
+ document.getElementById('mobile-login-form').onsubmit=async event=>{event.preventDefault();const input=document.getElementById('mobile-login-link');let code=input.value.trim();try{if(code.startsWith('https://'))code=new URLSearchParams(new URL(code).hash.slice(1)).get('code')||'';if(!/^[a-f0-9]{64}$/.test(code))throw Error('Dán đúng liên kết đăng nhập do bot gửi');const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}};
+ document.getElementById('mobile-logout').onclick=()=>{session='';localStorage.removeItem('monitor-session');cached=null;login.hidden=false;};
+ const updateButton=document.getElementById('mobile-update');
+ if(updateButton)updateButton.onclick=async()=>{
+  if(commandPending){commandNotice('Chờ thao tác hoàn tất rồi cập nhật app.');return;}
+  updateButton.disabled=true;updateButton.textContent='Đang cập nhật…';
+  try{
+   if('caches'in globalThis){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith('monitor-mobile-')).map(key=>caches.delete(key)));}
+   if('serviceWorker'in navigator){const registration=await navigator.serviceWorker.getRegistration();if(registration)await registration.update();}
+   const url=new URL(location.href);url.searchParams.set('refresh',Date.now());location.replace(url.href);
+  }catch(error){updateButton.disabled=false;updateButton.textContent='Cập nhật app';commandNotice(error.message);}
+ };
+ if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(reg=>reg.update()).catch(()=>{});
+})();

@@ -3,6 +3,64 @@ async function getState(){
   return r?.state||null;
 }
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const manualStatusBusy=new Set();
+function fsRoutingActive(s,fs,profile){
+ const group=profile==='COLLECTION'?'99.153':'99.155',data=s.opensips?.[group];
+ const age=Date.now()-(data?.updatedAt||0),nodes=(data?.nodes||[]).filter(n=>n.fs===fs);
+ return age>=0&&age<45000&&nodes.length===1&&nodes[0].groupId===(group==='99.153'?2:3);
+}
+function manualStatusControl(s,fs,profile){
+ const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===fs&&n.profile===profile&&n.status==='ACTIVE');
+ const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
+ if(!row)return `<div class="fs-phone-status muted"><span>Chờ số điện thoại</span><button class="secondary" data-refresh-phone="${esc(fs)}">Đọc lại số</button><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" disabled><option value="" selected>Chờ cập nhật số…</option><option value="ACTIVE">⚪ ACTIVE</option><option value="BACKUP">🔵 BACKUP</option><option value="BLOCKED">🔴 BLOCKED</option></select></div>`;
+ const busy=manualStatusBusy.has(fs),active=fsRoutingActive(s,fs,profile);
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
+}
+document.querySelector('#groups').addEventListener('click',async event=>{
+ const button=event.target.closest('[data-refresh-phone]');if(!button)return;
+ button.disabled=true;confirmationNotice('Đang đọc lại số từ FreeSWITCH…');
+ try{const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs:button.dataset.refreshPhone,refresh:true});if(!result?.ok)throw Error(result?.error||'Chưa đọc được số.');confirmationNotice('Đã đọc lại số FreeSWITCH.');}
+ catch(error){confirmationNotice(error.message);}finally{button.disabled=false;render().catch(()=>{});}
+});
+document.querySelector('#groups').addEventListener('change',async event=>{
+ const select=event.target.closest('[data-phone-status]');if(!select)return;
+ const {fs,phone,expected}=select.dataset,status=select.value;
+ if(status===expected||manualStatusBusy.has(fs))return;
+ manualStatusBusy.add(fs);select.disabled=true;
+ confirmationNotice(`${fs}: đang đổi ${expected} → ${status}…`);
+ try{
+  const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs,phone,expectedStatus:expected,status});
+  if(!result?.ok)throw Error(result?.error||'Không xác minh được trạng thái.');
+  confirmationNotice(`${fs}: đã đổi ${phone} → ${status}`);
+ }catch(error){select.value=expected;confirmationNotice(error.message);}
+ finally{manualStatusBusy.delete(fs);select.disabled=false;render().catch(()=>{});}
+});
+function importantAlerts(s,now=Date.now()){
+ const out=(s.importantFailures||[]).filter(a=>now-a.at<86400000).map(a=>({...a}));
+ for(const f of Object.values(s.fsStates||{})){
+  const i=f.incident||{},base=`${f.group}|${f.fs}|${i.id||'none'}`;
+  if(i.actionUncertain||(!i.actionPending&&f.actionError&&!i.autoExecuted&&!i.manualExecuted))out.push({id:base+'|failure|'+(f.actionError||''),fs:f.fs,at:i.requestedAt||f.updatedAt,title:i.actionUncertain?'Chưa xác minh được kết quả đổi số':'Không đổi được số',detail:f.actionError||'Kiểm tra trạng thái FreeSWITCH trước khi thử lại.'});
+  const cdr=f.cdr?.decision||f.cdr,switched=i.switchedAt||f.switchedAt;
+  const attempts=new Set([...(i.attemptedPhones||[]),...(i.previousPhone?[i.previousPhone]:[]),...(i.oldPhone?[i.oldPhone]:[])]).size;
+  const cdrAt=cdr?.checkedAt||f.cdr?.checkedAt;
+  const active=f.groupId===(f.group==='99.153'?2:3);
+  if(active&&!s.schedule?.groups?.[f.group]?.paused&&(i.autoExecuted||i.manualExecuted)&&!i.actionPending&&attempts>=2&&switched&&now-switched>=5000&&now-f.updatedAt<=45000&&now-cdrAt<=10000&&cdrAt>switched&&cdr?.newestCallTime>switched&&cdr.locked&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){
+   out.push({id:base+'|no-recovery',fs:f.fs,at:switched,title:`Đã đổi ${attempts} số nhưng FS chưa phục hồi`,detail:`VT hiện tại ${f.currentVt}; CDR mới vẫn báo lỗi liên tiếp. Cần kiểm tra FS/đầu số.`});
+  }
+ }
+ const op=s.fsSwitchOperation;
+ if(op?.status==='FAILED')out.push({id:`rotation|${op.id||op.startedAt||op.finishedAt}|${op.error}`,fs:op.plan?.source?.fs,title:'Thay FS thất bại',at:op.finishedAt||op.startedAt,detail:op.error||'Kiểm tra OpenSIPS/FreeSWITCH trước khi tiếp tục.'});
+ return out;
+}
+let seenImportant=[];
+try{seenImportant=JSON.parse(localStorage.getItem('monitor-important-seen')||'[]');if(!Array.isArray(seenImportant))seenImportant=[];}catch(_){}
+const dismissedImportant=new Set(seenImportant);
+document.querySelector('#summary').addEventListener('click',event=>{
+ const button=event.target.closest('[data-important-dismiss]');if(!button)return;
+ dismissedImportant.add(button.dataset.importantDismiss);
+ try{localStorage.setItem('monitor-important-seen',JSON.stringify([...dismissedImportant].slice(-100)));}catch(_){}
+ button.closest('[data-important-alert]').remove();
+});
 const dismissedCdrWarnings=new Set();
 const cdrWarningKey=w=>`${w.group}|${w.fs}|${w.pattern}|${w.at}`;
 document.querySelector('#summary').onclick=event=>{
@@ -90,6 +148,7 @@ function patchChildren(target,source){
       for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
       for(const attr of [...next.attributes])if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
       patchChildren(current,next);
+      if(current.nodeName==='SELECT'&&current.hasAttribute('data-phone-status')&&!manualStatusBusy.has(current.dataset.fs))current.value=next.value;
     }else if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;
   }
   while(target.childNodes.length>wanted.length)target.removeChild(target.lastChild);
@@ -143,7 +202,7 @@ function renderConfirmation(s,force=false){
   confirmationButton.textContent=`Xác nhận BLOCK (${pending.length})`;
   if(!action){
     dialog.close();selectedAction=null;
-    if(force)confirmationNotice(Object.values(s.schedule?.groups||{}).some(g=>g.paused)?'Không có yêu cầu BLOCK hợp lệ. Sale nghỉ 11:40–13:00 và 17:00–09:00; Collection nghỉ 12:10–13:00 và 18:00–09:00.':s.autoEnabled?'Chưa có yêu cầu BLOCK hợp lệ chờ xác nhận.':'AUTO BLOCK đang OFF. Bật AUTO để tạo yêu cầu xác nhận.');
+    if(force)confirmationNotice(Object.values(s.schedule?.groups||{}).some(g=>g.paused)?'Không có yêu cầu BLOCK hợp lệ. Sale nghỉ 11:40–13:00 và 17:00–08:00; Collection nghỉ 12:10–13:00 và 18:00–08:00.':s.autoEnabled?'Chưa có yêu cầu BLOCK hợp lệ chờ xác nhận.':'AUTO BLOCK đang OFF. Bật AUTO để tạo yêu cầu xác nhận.');
     return;
   }
   selectedAction=action;
@@ -189,6 +248,7 @@ async function render(){
   const sequence=++renderSequence;
   const s=await getState(); if(!s||sequence!==renderSequence||confirmationBusy)return;
   if(!autoModeDialog.open)document.querySelector('#auto-block-mode').value=s.autoBlockMode||'MANUAL';
+  document.querySelector('#remote-sync-status').textContent=s.remoteSync?.error?'Đồng bộ điện thoại: '+s.remoteSync.error:'';
   const toggle=document.querySelector("#toggle");
   const auto=document.querySelector("#auto");
   auto.textContent=s.autoEnabled?"AUTO BLOCK: ON":"AUTO BLOCK: OFF";
@@ -196,6 +256,8 @@ async function render(){
   toggle.textContent=s.monitoringEnabled?"MONITORING: ON":"MONITORING: OFF";
   toggle.className=s.monitoringEnabled?"on":"off";
 
+  const important=importantAlerts(s).filter(a=>!dismissedImportant.has(a.id));
+  const importantMarkup=important.length?`<div class="card bad" role="alert"><b>CẢNH BÁO CẦN XỬ LÝ</b>${important.map(a=>`<div data-important-alert style="padding:12px 0;border-bottom:1px solid #ffffff20"><button type="button" class="secondary" data-important-dismiss="${esc(a.id)}" style="float:right;padding:4px 10px">Đã xem</button><b>${esc(a.fs||'Hệ thống')} · ${esc(a.title)}</b><div>${esc(a.detail)}</div><small class="muted">${a.at?esc(new Date(a.at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})):''}</small></div>`).join('')}</div>`:'';
   const specialWarnings=(s.cdrWarnings||[]).filter(w=>w.at>Date.now()-15000&&!dismissedCdrWarnings.has(cdrWarningKey(w))).slice(0,8);
   const specialMarkup=specialWarnings.length?`<div class="card warning"><b>CẢNH BÁO CDR ĐẶC BIỆT</b>${specialWarnings.map(w=>`<p data-cdr-warning><button type="button" class="secondary" data-dismiss-cdr="${esc(cdrWarningKey(w))}" aria-label="Đóng cảnh báo CDR" style="float:right;padding:2px 10px">×</button><b>${esc(w.fs)} · ${w.group==='99.153'?'Collection':'Sale'}</b> · ${esc(w.ip)}<br><b>${esc(w.pattern)}</b> · ${esc(w.count)} cuộc liên tiếp · ${esc(new Date(w.at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}))}</p>`).join('')}</div>`:'';
   const alerts=s.alerts||[];
@@ -205,9 +267,9 @@ async function render(){
   const pauseNotice=['99.153','99.155'].map(group=>{
     const g=schedules[group],name=group==='99.153'?'Collection':'Sale';
     if(!g?.paused)return '';
-    return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–09:00`:`tạm nghỉ ${esc(g.startAt)}–13:00`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?'Vẫn đọc Group ID/CDR. Đến 09:00 đánh giá CDR mới; MONITORING tắt tay vẫn giữ OFF.':'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
+    return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–08:00`:`tạm nghỉ ${esc(g.startAt)}–13:00`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?'Vẫn đọc Group ID/CDR. Đến 08:00 đánh giá CDR mới; MONITORING tắt tay vẫn giữ OFF.':'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
   }).join('');
-  document.querySelector("#summary").innerHTML=specialMarkup+pauseNotice+(alerts.length
+  document.querySelector("#summary").innerHTML=importantMarkup+specialMarkup+pauseNotice+(alerts.length
     ? `<div class="card bad"><b>${s.config?.cdrVerificationEnabled?'CDR XÁC NHẬN NGHI BLOCK':'SUSPECTED BLOCK'}</b>${alerts.map(a=>`<div>${esc(a.group)} → ${esc(a.fs)} (${esc(a.ip)})${a.actionPending?' · Đang đổi, chưa hoàn tất':a.actionUncertain?' · Chưa xác minh BLOCKED, cần kiểm tra':''}${s.processingStatus?.[`${a.group}|${a.fs}|${a.ip}`]?`<br>${esc(s.processingStatus[`${a.group}|${a.fs}|${a.ip}`])}`:''}</div>`).join("")}${s.autoEnabled
       ? `<div class="action-note">${s.autoBlockMode==='AUTOMATIC'?'AUTO BLOCK: tự đổi ACTIVE → BLOCKED khi đủ điều kiện.':'AUTO BLOCK: chờ bạn kiểm tra và xác nhận trước khi đổi ACTIVE → BLOCKED.'}</div>`
       : `<div class="action-note">${s.config?.cdrVerificationEnabled?'AUTO BLOCK OFF. Chỉ đổi số khi VT tụt theo baseline và CDR đủ 5 cuộc liên tiếp 480-0-0 / 480-1-0.':'ACTION REQUIRED: change the matching FreeSWITCH number from ACTIVE to BLOCKED manually.'}</div>`}</div>`
@@ -233,7 +295,7 @@ async function render(){
         !s.monitoringEnabled?'MONITOR đang OFF':n.used>0?
         `FS đang bật; học baseline ${fs.healthyHistory?.length||0}/${s.config.baselineSamples??20} mẫu`:'FS đang bật; chờ VT tăng'):
         rawState==='INACTIVE'&&groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
-      const stateClass=fs.state==="SUSPECTED"?"bad":fs.state==="HEALTHY"?"good":
+      const stateClass=!fsRoutingActive(s,n.fs,g==='99.153'?'COLLECTION':'TELESALE')?"muted":fs.state==="SUSPECTED"?"bad":fs.state==="HEALTHY"?"good":
         fs.state==="WATCHING"?"watching":fs.state==="WARNING"?"warning":
         ["COOLDOWN","RECOVERING"].includes(fs.state)?"cooldown":"muted";
       const manualButton=fs.state==='SUSPECTED'&&fs.incident&&!fs.incident.locked
@@ -261,7 +323,7 @@ async function render(){
       const backupProfile=g==='99.153'?'COLLECTION':'TELESALE';
       const cachedBackup=s.freeswitch?.backupCounts?.[n.fs];
       const backupCount=cachedBackup?.count??(s.freeswitch?.numbers? s.freeswitch.numbers.filter(row=>row.fs===n.fs&&row.profile===backupProfile&&row.status==='BACKUP').length:null);
-      groups+=`<tr><td data-label="FS">${esc(n.fs||"?")} (${backupCount??'—'})</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
+      groups+=`<tr><td data-label="FS">${esc(n.fs||"?")} (${backupCount??'—'})${manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
     }
     groups+="</table></div></div>";
   }
@@ -324,3 +386,23 @@ document.querySelector('#clear-history-confirm').onclick=async()=>{
 };
 render().catch(()=>confirmationNotice('Không kết nối được extension. Hãy tải lại dashboard.'));
 setInterval(()=>render().catch(()=>{}),1000);
+
+const mobileLinkButton=document.querySelector('#create-mobile-link');
+mobileLinkButton.onclick=async()=>{
+  mobileLinkButton.disabled=true;
+  try{const result=await chrome.runtime.sendMessage({type:'CREATE_MOBILE_LINK'});if(!result?.ok)throw Error(result?.error||'Không tạo được liên kết');document.querySelector('#mobile-link-url').value=result.url;document.querySelector('#mobile-link-dialog').showModal();}
+  catch(error){confirmationNotice(error.message);}
+  finally{mobileLinkButton.disabled=false;}
+};
+document.querySelector('#mobile-link-copy').onclick=async()=>{try{await navigator.clipboard.writeText(document.querySelector('#mobile-link-url').value);confirmationNotice('Đã sao chép liên kết đăng nhập');}catch(error){document.querySelector('#mobile-link-url').select();}};
+document.querySelector('#mobile-link-close').onclick=()=>document.querySelector('#mobile-link-dialog').close();
+
+document.querySelector('#mobile-password-open').onclick=()=>document.querySelector('#mobile-password-dialog').showModal();
+document.querySelector('#mobile-password-close').onclick=()=>document.querySelector('#mobile-password-dialog').close();
+document.querySelector('#mobile-password-form').onsubmit=async event=>{
+ event.preventDefault();const first=document.querySelector('#mobile-password-new'),repeat=document.querySelector('#mobile-password-repeat'),error=document.querySelector('#mobile-password-error'),button=document.querySelector('#mobile-password-save');
+ if(first.value!==repeat.value){error.textContent='Hai mật khẩu chưa khớp.';return;}
+ button.disabled=true;error.textContent='Đang lưu…';
+ try{const result=await chrome.runtime.sendMessage({type:'SET_MOBILE_PASSWORD',password:first.value});if(!result?.ok)throw Error(result?.error||'Không lưu được mật khẩu.');first.value='';repeat.value='';error.textContent='';document.querySelector('#mobile-password-dialog').close();confirmationNotice('Đã lưu mật khẩu app điện thoại.');}
+ catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+};

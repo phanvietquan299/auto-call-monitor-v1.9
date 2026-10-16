@@ -9,7 +9,7 @@
     saleCooldownMs:30000,saleRecoverySamples:8,saleRecoveryStableMs:20000,
     saleRecoveryMinVt:0,saleRecoveryTrafficFloor:4,saleRecoveryRangeFloor:2,
     recoveryRangeRatio:0.35,recoveryTrafficFloor:50,recoveryStableMs:60000,recoveryDelayedMs:300000,backupBlockWaitMs:5000,rotationBackupGraceMs:30000,slowBaselineStableMs:60000,
-    workdayStartMinute:540,collectionDayEndMinute:1080,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
+    workdayStartMinute:480,collectionDayEndMinute:1080,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
   const median=values=>{const a=values.filter(Number.isFinite).slice().sort((a,b)=>a-b);const i=Math.floor(a.length/2);return a.length?(a.length%2?a[i]:(a[i-1]+a[i])/2):null;};
   const keyOf=a=>`${a.group}|${a.fs}|${a.ip}`;
   function event(s,type,f,now,detail){
@@ -30,12 +30,12 @@
     const date=local.toISOString().slice(0,10);
     const start=group==='99.153'?c.collectionPauseStartMinute:c.scheduledPauseStartMinute;
     const eveningEnd=group==='99.153'?(c.collectionDayEndMinute??1080):(c.saleDayEndMinute??1020);
-    const earlyMorning=minute<(c.workdayStartMinute??540);
+    const earlyMorning=minute<(c.workdayStartMinute??480);
     const dayEnd=earlyMorning||minute>=eveningEnd;
     const nightDate=earlyMorning?new Date(local.getTime()-86400000).toISOString().slice(0,10):date;
     return {paused:dayEnd||minute>=start&&minute<c.scheduledPauseEndMinute,
       startAt:dayEnd?(group==='99.153'?'18:00':'17:00'):group==='99.153'?'12:10':'11:40',
-      endAt:dayEnd?'09:00':'13:00',
+      endAt:dayEnd?'08:00':'13:00',
       phase:dayEnd?'DAY_END':group==='99.155'&&minute>=c.scheduledHandoffMinute?'HANDOFF':'LUNCH',
       cycle:dayEnd?`${nightDate}|DAY_END`:`${date}|${minute>=c.scheduledPauseEndMinute?'AFTER':'BEFORE'}`,
       pauseId:`${dayEnd?nightDate:date}|${dayEnd?'DAY_END':'LUNCH'}`};
