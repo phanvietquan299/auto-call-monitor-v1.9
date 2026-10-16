@@ -228,17 +228,17 @@
       const handled=f.incident?.autoExecuted||f.incident?.manualExecuted;
       if(handled){
         const i=f.incident;
-        if(e.newestCallTime<=i.switchedAt){f.state='RECOVERING';continue;}
+        if(e.newestCallTime<=i.switchedAt||e.checkedAt<=i.switchedAt){f.state='RECOVERING';continue;}
         if(!e.locked&&s.config.cdrRequireVtDrop&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){f.state='RECOVERING';continue;}
         if(!e.locked){f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.state='HEALTHY';if(s.config.cdrRequireVtDrop){f.baseline=null;f.baselineVt=null;f.healthyHistory=[];f.vtDropAt=null;}continue;}
         f.state='RECOVERING';
-        if(i.isBackup||now-i.switchedAt<(s.config.backupBlockWaitMs??5000))continue;
+        if(now-i.switchedAt<(s.config.backupBlockWaitMs??5000)||active[0].phone===i.oldPhone)continue;
         if(s.config.cdrRequireVtDrop){
           const values=(f.history||[]).filter(x=>x.time>i.switchedAt).slice(-3).map(x=>x.vt);
           if(!Number.isFinite(i.vtAtSwap)||values.length<2||f.currentVt>i.vtAtSwap||median(values)>i.vtAtSwap)continue;
         }
         f.lastIncident=i;f.incident=null;
-        f.cdrBackup={noVtGrowth:true,vtAtSwap:i.vtAtSwap,previousPhone:i.oldPhone,attemptedPhones:[...(i.attemptedPhones||[]),i.oldPhone]};
+        f.cdrBackup={noVtGrowth:true,vtAtSwap:i.vtAtSwap,previousPhone:i.oldPhone,parentIncidentId:i.id,attemptedPhones:[...new Set([...(i.attemptedPhones||[]),i.oldPhone])]};
       }
       const activation=activationBlockReady(s,f,now),backupNoGrowth=f.cdrBackup?.noVtGrowth;
       if(e.locked&&(hybridVtReady(s,f,now)||backupNoGrowth)&&(!s.config.cdrRequireVtDrop||activation||backupNoGrowth||(pairedCdrProof(s,f,now)||e.checkedAt>=(f.vtDropAt||0)))){
@@ -246,7 +246,7 @@
         if(!f.incident||f.incident.cancelled){
           const backup=f.cdrBackup;
           f.incident={id:`${f.group}-${f.fs}-cdr-${now}`,startedAt:now,oldPhone:e.phone,locked:false,autoExecuted:false,actionCount:0,
-            activationRecovery:activation,...(backup?{isBackup:true,noVtGrowth:backup.noVtGrowth,vtAtSwap:backup.vtAtSwap,previousPhone:backup.previousPhone,attemptedPhones:backup.attemptedPhones}:{})};
+            activationRecovery:activation,...(backup?{isBackup:true,noVtGrowth:backup.noVtGrowth,vtAtSwap:backup.vtAtSwap,previousPhone:backup.previousPhone,parentIncidentId:backup.parentIncidentId,attemptedPhones:backup.attemptedPhones}:{})};
           f.cdrBackup=null;f.candidateId=f.incident.id;f.startedAt=now;f.autoValidationFailures=0;f.autoRetryAfter=null;
         }
         const i=f.incident;

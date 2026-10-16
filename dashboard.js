@@ -209,7 +209,7 @@ function renderConfirmation(s,force=false){
   document.querySelector('#block-confirm').disabled=action.canConfirm===false;
   const f=s.fsStates[action.key]||{};
   document.querySelector('#block-details').innerHTML=`<p>Nhóm <b>${esc(action.group)}</b> · <b>${esc(action.fs)}</b> · ${esc(action.profile)}</p>
-    ${action.isBackup?'<p><b>BLOCK dự phòng · lần 2/2: còn lỗi sau lần đầu.</b></p>':''}<p>IP: ${esc(action.ip)}<br>Số điện thoại: <b>${esc(action.phone)}</b><br>Trạng thái: <b>ACTIVE → BLOCKED</b></p>
+    ${action.isBackup?'<p><b>BLOCK dự phòng: VT chưa tăng và CDR mới vẫn lỗi.</b></p>':''}<p>IP: ${esc(action.ip)}<br>Số điện thoại: <b>${esc(action.phone)}</b><br>Trạng thái: <b>ACTIVE → BLOCKED</b></p>
     ${s.config?.detectionSource==='CDR'?`<p>CDR: <b>${esc(f.incident?.manualCdrProof?.consecutiveTotal??f.cdr?.decision?.consecutiveTotal??0)}/5 cuộc liên tiếp</b><br>480-0-0 / 480-1-0 · ${esc(age(f.incident?.manualCdrProof?.checkedAt??f.cdr?.decision?.checkedAt))}</p>`:`<p>VT hiện tại: ${esc(f.currentVt)}<br>Baseline: ${esc(f.baseline)}<br>Recent: ${esc(f.recentMedian)}<br>Mức tụt: ${esc(f.dropPercent)}%</p>`}
     <p class="muted">${action.canConfirm===false?esc(action.waitReason||"Đang chờ lượt xử lý")+"<br>":""}${pending.length} sự cố chờ kiểm tra. Chỉ đổi trạng thái số trên; không bấm Đổi Số.</p>`;
   if(force)dismissedAction=null;

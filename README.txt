@@ -1,3 +1,5 @@
+1.17.18: Luồng VT + CDR tiếp tục xét BLOCK dự phòng sau mỗi lần đổi, tối thiểu 5s/lượt, không giới hạn một lần dự phòng. Chỉ đổi số ACTIVE mới khi VT không tăng và CDR mới tiếp tục 5/5 lỗi; giữ lịch, chế độ tay/tự động và kiểm tra chống trùng số.
+
 1.17.17: Collection/Sale kết thúc nghỉ qua đêm lúc 08:00 giờ Việt Nam thay vì 09:00. Nâng cấu hình đã lưu sang giờ mới; giữ lịch nghỉ trưa, giờ kết thúc ngày và MONITORING tắt tay.
 
 1.17.16: Mục Cảnh báo cần xử lý trên app/tool: lỗi đổi số/kết quả chưa xác minh, thay FS thất bại, đã đổi >=2 số nhưng VT không tăng và CDR mới vẫn lỗi sau 5s. Có Đã xem, không hiện các lần đổi thành công trong mục cảnh báo.
