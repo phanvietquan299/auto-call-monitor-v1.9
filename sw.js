@@ -1,4 +1,4 @@
-const CACHE='monitor-mobile-1.17.18';
+const CACHE='monitor-mobile-1.17.19';
 const FILES=['./','./index.html','./adapter.js','./config.js','./dashboard.js','./dashboard-fs-switch.js','./fs-switch.js','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('monitor-mobile-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
