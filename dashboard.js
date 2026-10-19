@@ -406,3 +406,18 @@ document.querySelector('#mobile-password-form').onsubmit=async event=>{
  try{const result=await chrome.runtime.sendMessage({type:'SET_MOBILE_PASSWORD',password:first.value});if(!result?.ok)throw Error(result?.error||'Không lưu được mật khẩu.');first.value='';repeat.value='';error.textContent='';document.querySelector('#mobile-password-dialog').close();confirmationNotice('Đã lưu mật khẩu app điện thoại.');}
  catch(e){error.textContent=e.message;}finally{button.disabled=false;}
 };
+
+const historyExportButton=document.querySelector('#history-export');
+historyExportButton.onclick=async()=>{
+ if(historyExportButton.disabled)return;const date=historyDate,status=document.querySelector('#history-export-status');
+ historyExportButton.disabled=true;status.textContent=' Đang lấy toàn bộ lịch sử…';
+ try{
+  const result=await chrome.runtime.sendMessage({type:'HISTORY_READ',date});
+  if(!result?.ok||!Array.isArray(result.events))throw Error(result?.error||'Không đọc được lịch sử.');
+  const file=HistoryExport.workbook(result.events,date);
+  if(!file.count){status.textContent=' Không có lượt thay đổi thành công trong ngày đã chọn.';return;}
+  const blob=new Blob([file.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=`lich-su-thay-so-${date||'tat-ca'}.xlsx`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  status.textContent=` Đã xuất ${file.count} lượt${result.sync?.error?' · dữ liệu lưu trên máy, đồng bộ đang lỗi':''}.`;
+ }catch(error){status.textContent=' '+error.message;}finally{historyExportButton.disabled=false;}
+};
