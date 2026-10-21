@@ -155,6 +155,7 @@
     return points.length>=1&&f.currentVt<=initial&&median(points.slice(-3).map(x=>x.vt))<=initial;
   }
   function hybridVtReady(s,f,now){
+    if(s.config?.cdrRequireVtDrop&&f.incident?.isBackup)return Number.isFinite(f.incident.vtAtSwap)&&Number.isFinite(f.currentVt)&&f.currentVt<=f.incident.vtAtSwap&&now-f.updatedAt>=0&&now-f.updatedAt<=s.config.staleMs;
     return cdrVtDrop(s,f,now)||activationBlockReady(s,f,now)||!!(f.incident?.isBackup&&f.incident.noVtGrowth&&
       Number.isFinite(f.currentVt)&&f.currentVt<=f.incident.vtAtSwap&&now-f.updatedAt<=s.config.staleMs);
   }
@@ -208,6 +209,12 @@
     if(!cdrPrimary(s))return;
     for(const f of Object.values(s.fsStates||{})){
       if(!isFsActive(s,f,now)||pausedFor(s,f.group)||!s.monitoringEnabled)continue;
+      // Retire the old perpetual watcher; a completed recovery cannot authorize a new backup.
+      f.postSwapWatch=null;
+      if(f.incident?.postSwapCdrFailure&&f.lastIncident?.id===f.incident.parentIncidentId&&f.lastIncident.closed){
+        f.incident=null;f.candidateId=null;f.pairedCdrProof=null;f.cdrBackup=null;
+      }
+      if(!f.incident)f.cdrBackup=null;
       if(f.incident?.actionPending||f.incident?.actionUncertain)continue;
       let e=f.cdr?.decision;
       const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
@@ -220,6 +227,13 @@
           f.pairedCdrProof={...e,callIds:[...(e.callIds||[])]};
         e=pairedCdrProof(s,f,now)||e;
       }
+      if(s.config.cdrRequireVtDrop&&f.incident?.isBackup&&!f.incident.locked&&Number.isFinite(f.incident.vtAtSwap)&&f.currentVt>f.incident.vtAtSwap){
+        const previous=f.lastIncident;
+        if(previous?.id===f.incident.parentIncidentId&&!previous.closed&&(previous.autoExecuted||previous.manualExecuted)){
+          f.incident=previous;f.candidateId=previous.id;f.state='RECOVERING';f.cdrBackup=null;f.pairedCdrProof=null;
+        }else {f.incident.cancelled=true;f.state='WARNING';}
+        continue;
+      }
       if(f.incident?.manualCdrProof&&!f.incident.locked&&!f.incident.cancelled){
         if(manualCdrProof(s,f)){f.state='SUSPECTED';continue;}
         f.lastIncident={...f.incident,closed:true,closedAt:now};f.incident=null;f.candidateId=null;
@@ -227,10 +241,13 @@
       if((!fresh&&!pairedCdrProof(s,f,now))||!e.eligibleCount){if(!f.incident?.locked){f.state=hybridObservationState(s,f,now,null);if(f.incident)f.incident.cdrConfirmationReads=0;}continue;}
       const handled=f.incident?.autoExecuted||f.incident?.manualExecuted;
       if(handled){
+        // Recovery must use the latest actual response, never the held pre-swap proof.
+        e=f.cdr?.decision;
+        if(!fresh||!e?.eligibleCount){f.state='RECOVERING';continue;}
         const i=f.incident;
         if(e.newestCallTime<=i.switchedAt||e.checkedAt<=i.switchedAt){f.state='RECOVERING';continue;}
         if(!e.locked&&s.config.cdrRequireVtDrop&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){f.state='RECOVERING';continue;}
-        if(!e.locked){f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.state='HEALTHY';if(s.config.cdrRequireVtDrop){f.baseline=null;f.baselineVt=null;f.healthyHistory=[];f.vtDropAt=null;}continue;}
+        if(!e.locked){f.postSwapWatch=null;f.cdrBackup=null;f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.state='HEALTHY';if(s.config.cdrRequireVtDrop){f.baseline=null;f.baselineVt=null;f.healthyHistory=[];f.vtDropAt=null;}continue;}
         f.state='RECOVERING';
         if(now-i.switchedAt<(s.config.backupBlockWaitMs??5000)||active[0].phone===i.oldPhone)continue;
         if(s.config.cdrRequireVtDrop){
@@ -238,15 +255,15 @@
           if(!Number.isFinite(i.vtAtSwap)||values.length<2||f.currentVt>i.vtAtSwap||median(values)>i.vtAtSwap)continue;
         }
         f.lastIncident=i;f.incident=null;
-        f.cdrBackup={noVtGrowth:true,vtAtSwap:i.vtAtSwap,previousPhone:i.oldPhone,parentIncidentId:i.id,attemptedPhones:[...new Set([...(i.attemptedPhones||[]),i.oldPhone])]};
+        f.cdrBackup={postSwapCdrFailure:false,noVtGrowth:Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap,vtAtSwap:i.vtAtSwap,previousPhone:i.oldPhone,parentIncidentId:i.id,attemptedPhones:[...new Set([...(i.attemptedPhones||[]),i.oldPhone])]};
       }
-      const activation=activationBlockReady(s,f,now),backupNoGrowth=f.cdrBackup?.noVtGrowth;
+      const activation=activationBlockReady(s,f,now),backupNoGrowth=f.cdrBackup?.noVtGrowth||f.cdrBackup?.postSwapCdrFailure;
       if(e.locked&&(hybridVtReady(s,f,now)||backupNoGrowth)&&(!s.config.cdrRequireVtDrop||activation||backupNoGrowth||(pairedCdrProof(s,f,now)||e.checkedAt>=(f.vtDropAt||0)))){
         if(f.incident?.cancelled&&f.incident.rejectedCdrCalls===e.callIds?.join('|')){f.state='WARNING';continue;}
         if(!f.incident||f.incident.cancelled){
           const backup=f.cdrBackup;
           f.incident={id:`${f.group}-${f.fs}-cdr-${now}`,startedAt:now,oldPhone:e.phone,locked:false,autoExecuted:false,actionCount:0,
-            activationRecovery:activation,...(backup?{isBackup:true,noVtGrowth:backup.noVtGrowth,vtAtSwap:backup.vtAtSwap,previousPhone:backup.previousPhone,parentIncidentId:backup.parentIncidentId,attemptedPhones:backup.attemptedPhones}:{})};
+            activationRecovery:activation,...(backup?{isBackup:true,postSwapCdrFailure:backup.postSwapCdrFailure,noVtGrowth:backup.noVtGrowth,vtAtSwap:backup.vtAtSwap,previousPhone:backup.previousPhone,parentIncidentId:backup.parentIncidentId,attemptedPhones:backup.attemptedPhones}:{})};
           f.cdrBackup=null;f.candidateId=f.incident.id;f.startedAt=now;f.autoValidationFailures=0;f.autoRetryAfter=null;
         }
         const i=f.incident;
@@ -255,7 +272,7 @@
           i.cdrConfirmationReads=Math.min(2,(i.cdrConfirmationReads||0)+1);
           i.cdrLastConfirmationAt=e.checkedAt;
         }
-        e.incidentId=i.id;f.cdr.incidentId=i.id;f.activeBeforeIncident=true;f.state='SUSPECTED';f.detectionNote='VT đã tới ngưỡng và CDR đủ 5/5; nghi block được xác nhận bởi cả hai tín hiệu';
+        e.incidentId=i.id;f.cdr.incidentId=i.id;f.activeBeforeIncident=true;f.state='SUSPECTED';f.detectionNote=i.postSwapCdrFailure?'CDR mới vẫn lỗi 5/5 sau lần đổi số; tiếp tục BLOCK dự phòng':'VT đã tới ngưỡng và CDR đủ 5/5; nghi block được xác nhận bởi cả hai tín hiệu';
         if(s.config.cdrRequireVtDrop&&s.autoBlockMode==='MANUAL'&&s.autoEnabled&&(now-e.checkedAt<=10000||pairedCdrProof(s,f,now)))i.manualCdrProof={...e,callIds:[...(e.callIds||[])]};
       }else{
         if(f.incident&&!f.incident.locked){f.lastIncident={...f.incident,cancelled:true,closed:true,closedAt:now};f.incident=null;f.candidateId=null;}
@@ -270,8 +287,8 @@
     const e=held||paired||(cdrPrimary(s)?f.cdr?.decision:f.cdr),profile=f.group==='99.153'?'COLLECTION':'TELESALE';
     const active=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
     const confirmed=!cdrPrimary(s)||s.config?.cdrRequireVtDrop||(f.incident?.cdrConfirmationReads||0)>=2;
-    if(cdrPrimary(s)&&!held&&!hybridVtReady(s,f,now))return {ready:false,reason:'Chờ VT tụt theo baseline và CDR đủ 5/5'};
-    const ready=!!(confirmed&&(held||activationBlockReady(s,f,now)||f.incident?.noVtGrowth||!s.config?.cdrRequireVtDrop||(paired||e?.checkedAt>=(f.vtDropAt||0)))&&e?.locked&&!e.observation&&e.count===5&&e.incidentId===f.incident?.id&&e.group===f.group&&e.ip===f.ip&&
+    if(cdrPrimary(s)&&(!held||f.incident?.isBackup)&&!hybridVtReady(s,f,now))return {ready:false,reason:'Chờ VT tụt theo baseline và CDR đủ 5/5'};
+    const ready=!!(confirmed&&(held||activationBlockReady(s,f,now)||f.incident?.noVtGrowth||f.incident?.postSwapCdrFailure||!s.config?.cdrRequireVtDrop||(paired||e?.checkedAt>=(f.vtDropAt||0)))&&e?.locked&&!e.observation&&e.count===5&&e.incidentId===f.incident?.id&&e.group===f.group&&e.ip===f.ip&&
       (held||paired||now-e.checkedAt>=0&&now-e.checkedAt<=10000)&&active.length===1&&e.phone===active[0].phone);
     if(!confirmed)return {ready:false,reason:'SUSPECTED: chờ lượt đọc CDR kế tiếp vẫn đủ 5 cuộc liên tiếp'};
     return {ready,reason:held&&ready?'Đã ghi nhận CDR 5/5; chờ bạn xác nhận khi VT vẫn thấp':ready?'CDR xác nhận 5 cuộc liên tiếp 480-0-0 / 480-1-0':f.cdrStatus||'Chờ CDR xác nhận 5 cuộc mới nhất liên tiếp 480-0-0 / 480-1-0'};
@@ -322,9 +339,11 @@
     if(!i?.isBackup)return true;
     const rows=(s.freeswitch?.numbers||[]).filter(n=>n.fs===f.fs&&n.profile===profile);
     const active=rows.filter(n=>n.status==='ACTIVE');
-    return now-(s.freeswitch?.updatedAt||0)<=s.config.staleMs&&
-      rows.some(n=>n.phone===i.previousPhone&&n.status==='BLOCKED')&&
-      active.length===1&&active[0].phone===i.oldPhone&&!(i.attemptedPhones||[]).includes(active[0].phone);
+    const previous=rows.find(n=>n.phone===i.previousPhone),last=f.lastIncident;
+    const confirmedPrevious=previous?previous.status==='BLOCKED':
+      !!(last?.oldPhone===i.previousPhone&&last.switchedAt&&(last.autoExecuted||last.manualExecuted)&&!last.actionUncertain&&!last.closed);
+    return now-(s.freeswitch?.updatedAt||0)>=0&&now-(s.freeswitch?.updatedAt||0)<=s.config.staleMs&&
+      confirmedPrevious&&active.length===1&&active[0].phone===i.oldPhone&&!(i.attemptedPhones||[]).includes(active[0].phone);
   }
   function prepareBackup(s,f,now,switched,recovery,policy){
     const i=f.incident,c=s.config,assessment=backupAssessment(s,f,now);
@@ -553,7 +572,7 @@
     if(f.incident){f.incident.closed=true;f.incident.closedAt=now;f.lastIncident=f.incident;}
     event(s,'CONFIG_CHANGED',f,now,detail);
     s.pendingAutoActions=(s.pendingAutoActions||[]).filter(a=>a.key!==f.key);
-    Object.assign(f,{state:'INACTIVE',history:[],healthyHistory:[],baseline:null,baselineVt:null,
+    Object.assign(f,{state:'INACTIVE',postSwapWatch:null,cdrBackup:null,history:[],healthyHistory:[],baseline:null,baselineVt:null,
       recentMedian:null,dropPercent:null,incident:null,candidateId:null,severeWindows:0,
       startedAt:null,switchedAt:null,activeBeforeIncident:false,actionError:null,autoValidationFailures:0,autoRetryAfter:null,detectionNote:detail});
   }

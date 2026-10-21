@@ -9,3 +9,13 @@
 /supabase-config.js
 
 *.md
+
+# Local Oracle credentials
+/oracle/
+*.pem
+
+# Private exported reports
+/exports/
+
+# macOS metadata
+.DS_Store

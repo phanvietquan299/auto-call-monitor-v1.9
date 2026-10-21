@@ -44,8 +44,8 @@ function importantAlerts(s,now=Date.now()){
   const attempts=new Set([...(i.attemptedPhones||[]),...(i.previousPhone?[i.previousPhone]:[]),...(i.oldPhone?[i.oldPhone]:[])]).size;
   const cdrAt=cdr?.checkedAt||f.cdr?.checkedAt;
   const active=f.groupId===(f.group==='99.153'?2:3);
-  if(active&&!s.schedule?.groups?.[f.group]?.paused&&(i.autoExecuted||i.manualExecuted)&&!i.actionPending&&attempts>=2&&switched&&now-switched>=5000&&now-f.updatedAt<=45000&&now-cdrAt<=10000&&cdrAt>switched&&cdr?.newestCallTime>switched&&cdr.locked&&Number.isFinite(i.vtAtSwap)&&f.currentVt<=i.vtAtSwap){
-   out.push({id:base+'|no-recovery',fs:f.fs,at:switched,title:`Đã đổi ${attempts} số nhưng FS chưa phục hồi`,detail:`VT hiện tại ${f.currentVt}; CDR mới vẫn báo lỗi liên tiếp. Cần kiểm tra FS/đầu số.`});
+  if(active&&!s.schedule?.groups?.[f.group]?.paused&&(i.autoExecuted||i.manualExecuted)&&!i.actionPending&&attempts>=2&&switched&&now-switched>=5000&&now-f.updatedAt<=45000&&now-cdrAt<=10000&&cdrAt>switched&&cdr?.newestCallTime>switched&&cdr.locked){
+   out.push({id:base+'|no-recovery',fs:f.fs,at:switched,title:`Đã đổi ${attempts} số nhưng CDR vẫn lỗi`,detail:`VT hiện tại ${f.currentVt}; CDR mới vẫn báo lỗi liên tiếp. Cần kiểm tra FS/đầu số.`});
   }
  }
  const op=s.fsSwitchOperation;
@@ -209,7 +209,7 @@ function renderConfirmation(s,force=false){
   document.querySelector('#block-confirm').disabled=action.canConfirm===false;
   const f=s.fsStates[action.key]||{};
   document.querySelector('#block-details').innerHTML=`<p>Nhóm <b>${esc(action.group)}</b> · <b>${esc(action.fs)}</b> · ${esc(action.profile)}</p>
-    ${action.isBackup?'<p><b>BLOCK dự phòng: VT chưa tăng và CDR mới vẫn lỗi.</b></p>':''}<p>IP: ${esc(action.ip)}<br>Số điện thoại: <b>${esc(action.phone)}</b><br>Trạng thái: <b>ACTIVE → BLOCKED</b></p>
+    ${action.isBackup?'<p><b>BLOCK dự phòng: CDR mới vẫn lỗi sau khi đổi số.</b></p>':''}<p>IP: ${esc(action.ip)}<br>Số điện thoại: <b>${esc(action.phone)}</b><br>Trạng thái: <b>ACTIVE → BLOCKED</b></p>
     ${s.config?.detectionSource==='CDR'?`<p>CDR: <b>${esc(f.incident?.manualCdrProof?.consecutiveTotal??f.cdr?.decision?.consecutiveTotal??0)}/5 cuộc liên tiếp</b><br>480-0-0 / 480-1-0 · ${esc(age(f.incident?.manualCdrProof?.checkedAt??f.cdr?.decision?.checkedAt))}</p>`:`<p>VT hiện tại: ${esc(f.currentVt)}<br>Baseline: ${esc(f.baseline)}<br>Recent: ${esc(f.recentMedian)}<br>Mức tụt: ${esc(f.dropPercent)}%</p>`}
     <p class="muted">${action.canConfirm===false?esc(action.waitReason||"Đang chờ lượt xử lý")+"<br>":""}${pending.length} sự cố chờ kiểm tra. Chỉ đổi trạng thái số trên; không bấm Đổi Số.</p>`;
   if(force)dismissedAction=null;
@@ -405,4 +405,19 @@ document.querySelector('#mobile-password-form').onsubmit=async event=>{
  button.disabled=true;error.textContent='Đang lưu…';
  try{const result=await chrome.runtime.sendMessage({type:'SET_MOBILE_PASSWORD',password:first.value});if(!result?.ok)throw Error(result?.error||'Không lưu được mật khẩu.');first.value='';repeat.value='';error.textContent='';document.querySelector('#mobile-password-dialog').close();confirmationNotice('Đã lưu mật khẩu app điện thoại.');}
  catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+};
+
+const historyExportButton=document.querySelector('#history-export');
+historyExportButton.onclick=async()=>{
+ if(historyExportButton.disabled)return;const date=historyDate,status=document.querySelector('#history-export-status');
+ historyExportButton.disabled=true;status.textContent=' Đang lấy toàn bộ lịch sử…';
+ try{
+  const result=await chrome.runtime.sendMessage({type:'HISTORY_READ',date});
+  if(!result?.ok||!Array.isArray(result.events))throw Error(result?.error||'Không đọc được lịch sử.');
+  const file=HistoryExport.workbook(result.events,date);
+  if(!file.count){status.textContent=' Không có lượt thay đổi thành công trong ngày đã chọn.';return;}
+  const blob=new Blob([file.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=`lich-su-thay-so-${date||'tat-ca'}.xlsx`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  status.textContent=` Đã xuất ${file.count} lượt${result.sync?.error?' · dữ liệu lưu trên máy, đồng bộ đang lỗi':''}.`;
+ }catch(error){status.textContent=' '+error.message;}finally{historyExportButton.disabled=false;}
 };

@@ -1,3 +1,15 @@
+1.17.24: Khôi phục xét VT + CDR cho dự phòng: sau ít nhất 5s cần VT chưa tăng qua các mẫu sau đổi và CDR mới lỗi 5/5. Chặn cả lượt dự phòng đã xếp hàng/giữ xác nhận nếu VT tăng trở lại. Không thay đổi giao diện responsive và xuất Excel.
+
+1.17.23: Giới hạn CDR-only dự phòng trong đợt phục hồi sau lượt đổi đã xác nhận. Khi HEALTHY thì đóng đợt, xóa watcher cũ; lần locked mới trở về điều kiện VT + CDR. Giữ lặp 5s/CDR mới khi chưa hồi và hỗ trợ bộ lọc ACTIVE.
+
+1.17.22: Tiếp tục theo dõi CDR của số sau đổi kể cả đã HEALTHY tạm thời; CDR mới 5/5 lỗi tiếp tục dự phòng không cần ngưỡng VT. Lọc ACTIVE không chặn vì thiếu dòng BLOCKED cũ nếu lần BLOCK trước đã xác nhận; vẫn chặn dữ liệu mâu thuẫn và số chưa xác minh.
+
+1.17.21: Responsive điện thoại xoay ngang: header không ghim che bảng, tiêu đề gọn, 3 nhóm điều khiển theo cột; app gom ngưỡng/đặt trước FS vào phần mở rộng. Thanh phiên đăng nhập xuống dòng, hỗ trợ safe-area và cuộn form đăng nhập khi màn hình thấp.
+
+1.17.20: Xuất Excel .xlsx toàn bộ lịch sử theo ngày Việt Nam hoặc tất cả ngày, gồm sheet Lịch sử/Thống kê; giữ số 0 đầu số điện thoại và loại log trùng/test/lỗi/chưa thành công. Xuất trực tiếp trên máy/app, không gửi dữ liệu tới dịch vụ ngoài.
+
+1.17.19: Sau khi đổi số, nếu CDR mới của ACTIVE mới vẫn 5/5 lỗi sau tối thiểu 5s thì tiếp tục xét BLOCK dự phòng dù VT tăng. Lần nghi locked ban đầu vẫn dùng VT + CDR. Không dùng dữ liệu thiếu/cũ hoặc bằng chứng giữ từ trước lần đổi.
+
 1.17.18: Luồng VT + CDR tiếp tục xét BLOCK dự phòng sau mỗi lần đổi, tối thiểu 5s/lượt, không giới hạn một lần dự phòng. Chỉ đổi số ACTIVE mới khi VT không tăng và CDR mới tiếp tục 5/5 lỗi; giữ lịch, chế độ tay/tự động và kiểm tra chống trùng số.
 
 1.17.17: Collection/Sale kết thúc nghỉ qua đêm lúc 08:00 giờ Việt Nam thay vì 09:00. Nâng cấu hình đã lưu sang giờ mới; giữ lịch nghỉ trưa, giờ kết thúc ngày và MONITORING tắt tay.
