@@ -19,7 +19,7 @@
     if(!state.monitoringEnabled||['FAILED','RUNNING'].includes(feature.operation?.status))return [];
     const out=[];
     for(const [group,p] of Object.entries(groups)){
-      if(group==='99.153'&&['RUNNING','SINGLE','FINAL_CONFIRMED','NIGHT','FAILED'].includes(state.collectionEvening?.status))continue;
+      if(group==='99.153'&&['WAIT_LOCK','RUNNING','SINGLE','FINAL_CONFIRMED','NIGHT','FAILED'].includes(state.collectionEvening?.status))continue;
       if(state.schedule?.groups?.[group]?.paused||!fresh(state.opensips?.[group]?.updatedAt,now)||!fresh(state.freeswitch?.updatedAt,now))continue;
       const nodes=(state.opensips[group].nodes||[]).filter(n=>p.fs.includes(n.fs)&&n.resource==='vt'&&Number.isInteger(n.destinationId)&&n.destinationId>0&&n.groupId!=null);
       const rows=state.freeswitch.numbers||[];

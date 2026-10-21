@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Call Monitor V1.9",
-  "version": "1.17.25",
+  "version": "1.17.26",
   "description": "Persistent monitor dashboard for Grafana/OpenSIPS VT with manual monitoring toggle and event log.",
   "permissions": [
     "storage",

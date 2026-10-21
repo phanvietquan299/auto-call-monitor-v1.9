@@ -49,10 +49,10 @@
     const c={...CONFIG,...s.config},groups={};
     for(const group of ['99.153','99.155']){
       const current=scheduleAt(now,c,group),previous=s.schedule?.groups?.[group];
-      if(group==='99.153'&&s.collectionEvening?.status==='SINGLE'){
+      if(group==='99.153'&&['WAIT_LOCK','SINGLE'].includes(s.collectionEvening?.status)){
         const local=new Date(now+25200000),date=local.toISOString().slice(0,10),minute=local.getUTCHours()*60+local.getUTCMinutes();
         const previousDate=new Date(local.getTime()-86400000).toISOString().slice(0,10);
-        if((s.collectionEvening.date===date&&minute>=1080)||(s.collectionEvening.date===previousDate&&minute<480))Object.assign(current,{paused:false,phase:'FINAL_CHANGE',cycle:s.collectionEvening.date+'|AFTER',endAt:'08:00'});
+        if((s.collectionEvening.date===date&&minute>=1080)||(s.collectionEvening.date===previousDate&&minute<480))Object.assign(current,{paused:false,phase:s.collectionEvening.status==='WAIT_LOCK'?'WAIT_LOCK':'FINAL_CHANGE',cycle:s.collectionEvening.date+'|AFTER',endAt:'08:00'});
       }
       const entering=current.paused&&(!previous?.paused||previous.pauseId!==current.pauseId);
       const resuming=!current.paused&&(previous?.paused||previous&&previous.cycle!==current.cycle);

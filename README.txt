@@ -1,3 +1,5 @@
+1.17.26: Collection sau 17:00 giữ nguyên đến khi locked (VT + CDR), chỉ chọn FS nhiều BACKUP nhất trong các FS đang bật; không bật FS đang tắt. Sau 18:00 chờ lượt locked tiếp theo đổi thành công mới ngắt đến 08:00. Không tính lại incident kích hoạt gom nhóm làm lượt cuối.
+
 1.17.25: Lịch Collection 17:00 giữ FS có BACKUP cao nhất (bật đích trước, tắt các FS còn lại, Save/Reload/xác minh). Sau 18:00 vẫn chờ locked theo VT+CDR; một lần BLOCK xác nhận thành công thì tắt Collection đến 08:00 hôm sau, mở lại FS đã giữ. Lịch theo giờ VN, tôn trọng MONITORING OFF, lưu theo ngày và dừng khi lỗi không tự replay thao tác chưa rõ.
 
 1.17.24: Khôi phục xét VT + CDR cho dự phòng: sau ít nhất 5s cần VT chưa tăng qua các mẫu sau đổi và CDR mới lỗi 5/5. Chặn cả lượt dự phòng đã xếp hàng/giữ xác nhận nếu VT tăng trở lại. Không thay đổi giao diện responsive và xuất Excel.

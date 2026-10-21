@@ -1,28 +1,33 @@
 /* Read-only policy for Collection consolidation; execution uses the shared worker queue. */
 (function(root){
  const policy=root.FsSwitch||(typeof require==='function'?require('./fs-switch'):null);
+ const detection=root.Detection||(typeof require==='function'?require('./detection'):null);
  function phase(now){
   const local=new Date(now+25200000),minute=local.getUTCHours()*60+local.getUTCMinutes();
   return {date:local.toISOString().slice(0,10),minute,previousDate:new Date(local.getTime()-86400000).toISOString().slice(0,10),consolidate:minute>=1020};
  }
  function plan(state,now){
   const time=phase(now),group='99.153';
-  if(!time.consolidate||!state.monitoringEnabled||state.collectionEvening?.date===time.date)return null;
+  const overnight=state.collectionEvening?.status==='WAIT_LOCK'&&state.collectionEvening.date===time.previousDate&&time.minute<480;
+  if((!time.consolidate&&!overnight)||!state.monitoringEnabled||(state.collectionEvening?.date===time.date&&state.collectionEvening.status!=='WAIT_LOCK'))return null;
   const data=state.opensips?.[group];
   if(!data||now-data.updatedAt<0||now-data.updatedAt>45000||!state.freeswitch?.updatedAt||now-state.freeswitch.updatedAt<0||now-state.freeswitch.updatedAt>45000)return null;
   const candidates=[];
   for(const fs of policy.groups[group].fs){
    const rows=(data.nodes||[]).filter(n=>n.fs===fs&&n.resource==='vt');
    if(rows.length!==1||![0,2].includes(rows[0].groupId)||!Number.isInteger(rows[0].destinationId)||rows[0].destinationId<=0)return null;
+   if(rows[0].groupId!==2)continue;
    const summary=state.freeswitch.backupCounts?.[fs];
    if(summary?.source!=='SUMMARY'||now-summary.updatedAt<0||now-summary.updatedAt>45000)return null;
    const backups=policy.backupCount(state,fs,'COLLECTION',now);
    if(!Number.isSafeInteger(backups)||backups<0)return null;
    candidates.push({...rows[0],id:rows[0].destinationId,backups});
   }
+  const trigger=Object.values(state.fsStates||{}).find(f=>f.group===group&&candidates.some(n=>n.fs===f.fs&&n.ip===f.ip)&&f.state==='SUSPECTED'&&f.incident&&!f.incident.locked&&!f.incident.cancelled&&now-f.updatedAt>=0&&now-f.updatedAt<=45000&&detection.groupActionGate(state,f,now).ready);
+  if(!trigger||!candidates.length)return null;
   candidates.sort((a,b)=>b.backups-a.backups||Number(b.groupId===2)-Number(a.groupId===2)||a.fs.localeCompare(b.fs));
   const selected=candidates[0];
-  return {date:time.date,group,selected,enable:selected.groupId===0?[selected]:[],disable:candidates.filter(n=>n.fs!==selected.fs&&n.groupId===2)};
+  return {date:overnight?state.collectionEvening.date:time.date,group,selected,triggerIncidentId:trigger.incident.id,enable:[],disable:candidates.filter(n=>n.fs!==selected.fs&&n.groupId===2)};
  }
  function next(state,now){
   if(!state.monitoringEnabled)return null;
@@ -50,14 +55,14 @@
   const active=(state.opensips?.['99.153']?.nodes||[]).filter(n=>policy.groups['99.153'].fs.includes(n.fs)&&n.resource==='vt'&&n.groupId===2);
   if(active.length!==1)return null;
   const f=Object.values(state.fsStates||{}).find(f=>f.group==='99.153'&&f.fs===active[0].fs),i=f?.incident||f?.lastIncident;
-  const end=Date.parse(saved.date+'T18:00:00+07:00');
-  const manual=(state.events||[]).find(e=>e.group==='99.153'&&e.fs===active[0].fs&&e.type==='MANUAL_FS_STATUS'&&e.at>=end&&/ACTIVE → BLOCKED/.test(e.detail||''));
-  const confirmed=i&&(i.autoExecuted||i.manualExecuted)&&!i.actionUncertain&&!i.actionPending&&i.switchedAt>=end;
+  const end=Math.max(Date.parse(saved.date+'T18:00:00+07:00'),(saved.consolidatedAt||0)+1);
+  const manual=(state.events||[]).find(e=>e.group==='99.153'&&e.fs===active[0].fs&&e.type==='MANUAL_FS_STATUS'&&e.incidentId!==saved.triggerIncidentId&&e.at>=end&&/ACTIVE → BLOCKED/.test(e.detail||''));
+  const confirmed=i&&i.id!==saved.triggerIncidentId&&(i.autoExecuted||i.manualExecuted)&&!i.actionUncertain&&!i.actionPending&&i.switchedAt>=end;
   return confirmed||manual?{incidentId:confirmed?i.id:manual.incidentId||'manual-'+manual.at,at:confirmed?i.switchedAt:manual.at,selected:{...active[0],id:active[0].destinationId}}:null;
  }
  async function execute(state,job,deps){
   const previous=state.collectionEvening;
-  state.collectionEvening={...previous,date:job.date,selected:job.selected,status:'RUNNING',stage:job.kind,startedAt:deps.now()};await deps.save(state);
+  state.collectionEvening={...previous,date:job.date,selected:job.selected,...(job.kind==='CONSOLIDATE'?{triggerIncidentId:job.triggerIncidentId,consolidatedAt:deps.now()}:{}),status:'RUNNING',stage:job.kind,startedAt:deps.now()};await deps.save(state);
   try{
    for(const node of job.enable)await deps.setGroup(node,0,2);
    for(const node of job.disable)await deps.setGroup(node,2,0);

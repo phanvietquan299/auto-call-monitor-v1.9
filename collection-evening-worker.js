@@ -4,6 +4,10 @@ async function runCollectionEvening(state){
  if(state.collectionEvening?.status==='RUNNING'){
   state.collectionEvening.status='FAILED';state.collectionEvening.error='Lịch Collection bị gián đoạn; kiểm tra Group ID trước khi tiếp tục.';state.importantFailures=[{id:'evening-interrupted-'+state.collectionEvening.date,fs:'Collection',at:Date.now(),title:'Lịch Collection bị gián đoạn',detail:state.collectionEvening.error},...(state.importantFailures||[])].slice(0,20);await saveState(state);return;
  }
+ const time=CollectionEvening.phase(Date.now());
+ if(time.consolidate&&state.collectionEvening?.date!==time.date&&state.collectionEvening?.status!=='RUNNING'&&state.collectionEvening?.status!=='FINAL_CONFIRMED'){
+  state.collectionEvening={date:time.date,status:'WAIT_LOCK'};Detection.applySchedule(state,Date.now());await saveState(state);
+ }
  const final=CollectionEvening.finalChange(state,Date.now());
  if(final){state.collectionEvening={...state.collectionEvening,status:'FINAL_CONFIRMED',finalIncidentId:final.incidentId,finalAt:final.at,selected:final.selected};Detection.applySchedule(state,Date.now());await saveState(state);}
  const rotation=await chrome.storage.local.get('fsSwitch');
