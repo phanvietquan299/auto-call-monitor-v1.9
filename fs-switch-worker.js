@@ -267,6 +267,7 @@ function reconcileSwitchLocks(f,s){
   }
 }
 async function processSwitch(msg){
+  if(msg.type==='FS_SWITCH_TICK'&&typeof runCollectionEvening==='function'){const live=await getState();await runCollectionEvening(live);await saveState(live);}
   const f=await switchState();
   const initial=await switchSnapshot();
   reconcileSwitchLocks(f,initial);

@@ -1,3 +1,5 @@
+1.17.25: Lịch Collection 17:00 giữ FS có BACKUP cao nhất (bật đích trước, tắt các FS còn lại, Save/Reload/xác minh). Sau 18:00 vẫn chờ locked theo VT+CDR; một lần BLOCK xác nhận thành công thì tắt Collection đến 08:00 hôm sau, mở lại FS đã giữ. Lịch theo giờ VN, tôn trọng MONITORING OFF, lưu theo ngày và dừng khi lỗi không tự replay thao tác chưa rõ.
+
 1.17.24: Khôi phục xét VT + CDR cho dự phòng: sau ít nhất 5s cần VT chưa tăng qua các mẫu sau đổi và CDR mới lỗi 5/5. Chặn cả lượt dự phòng đã xếp hàng/giữ xác nhận nếu VT tăng trở lại. Không thay đổi giao diện responsive và xuất Excel.
 
 1.17.23: Giới hạn CDR-only dự phòng trong đợt phục hồi sau lượt đổi đã xác nhận. Khi HEALTHY thì đóng đợt, xóa watcher cũ; lần locked mới trở về điều kiện VT + CDR. Giữ lặp 5s/CDR mới khi chưa hồi và hỗ trợ bộ lọc ACTIVE.

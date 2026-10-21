@@ -263,13 +263,15 @@ async function render(){
   const alerts=s.alerts||[];
   const blocked=Object.entries(s.fsStates||{}).filter(([key,f])=>f.state==='SUSPECTED'&&!alerts.some(a=>`${a.group}|${a.fs}|${a.ip}`===key));
   const blockedNotice=blocked.length?`<div class="card warning"><b>FS SUSPECTED đang chờ xử lý</b>${blocked.map(([key,f])=>`<p><b>${esc(f.fs)}</b> · ${esc(s.processingStatus?.[key]||f.actionError||'Chưa đủ dữ liệu/điều kiện xử lý; kiểm tra Group ID và trang THAY FS.')}</p>`).join('')}</div>`:'';
+  const evening=s.collectionEvening;
+  const eveningNotice=evening&&['SINGLE','FINAL_CONFIRMED','NIGHT'].includes(evening.status)?`<div class="card watching"><b>Collection · ${evening.status==='NIGHT'?'Đã nghỉ đêm':evening.status==='FINAL_CONFIRMED'?'Đã đổi lượt cuối · đang ngắt FS':'Giữ một FS: '+esc(evening.selected?.fs||'')}</b><div>${evening.status==='SINGLE'?'Sau 18:00: chờ locked, đổi số thành công một lần rồi ngắt Collection đến 08:00.':evening.status==='NIGHT'?'Đã tắt Collection. 08:00 mở lại FS đã giữ; MONITORING tắt tay vẫn được tôn trọng.':'Không thực hiện thêm lượt đổi số trong lúc hoàn tất ngắt Collection.'}</div></div>`:'';
   const schedules=s.schedule?.groups||{};
   const pauseNotice=['99.153','99.155'].map(group=>{
     const g=schedules[group],name=group==='99.153'?'Collection':'Sale';
     if(!g?.paused)return '';
     return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–08:00`:`tạm nghỉ ${esc(g.startAt)}–13:00`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?'Vẫn đọc Group ID/CDR. Đến 08:00 đánh giá CDR mới; MONITORING tắt tay vẫn giữ OFF.':'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
   }).join('');
-  document.querySelector("#summary").innerHTML=importantMarkup+specialMarkup+pauseNotice+(alerts.length
+  document.querySelector("#summary").innerHTML=importantMarkup+specialMarkup+eveningNotice+pauseNotice+(alerts.length
     ? `<div class="card bad"><b>${s.config?.cdrVerificationEnabled?'CDR XÁC NHẬN NGHI BLOCK':'SUSPECTED BLOCK'}</b>${alerts.map(a=>`<div>${esc(a.group)} → ${esc(a.fs)} (${esc(a.ip)})${a.actionPending?' · Đang đổi, chưa hoàn tất':a.actionUncertain?' · Chưa xác minh BLOCKED, cần kiểm tra':''}${s.processingStatus?.[`${a.group}|${a.fs}|${a.ip}`]?`<br>${esc(s.processingStatus[`${a.group}|${a.fs}|${a.ip}`])}`:''}</div>`).join("")}${s.autoEnabled
       ? `<div class="action-note">${s.autoBlockMode==='AUTOMATIC'?'AUTO BLOCK: tự đổi ACTIVE → BLOCKED khi đủ điều kiện.':'AUTO BLOCK: chờ bạn kiểm tra và xác nhận trước khi đổi ACTIVE → BLOCKED.'}</div>`
       : `<div class="action-note">${s.config?.cdrVerificationEnabled?'AUTO BLOCK OFF. Chỉ đổi số khi VT tụt theo baseline và CDR đủ 5 cuộc liên tiếp 480-0-0 / 480-1-0.':'ACTION REQUIRED: change the matching FreeSWITCH number from ACTIVE to BLOCKED manually.'}</div>`}</div>`

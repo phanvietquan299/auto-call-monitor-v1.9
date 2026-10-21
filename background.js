@@ -1,4 +1,4 @@
-importScripts("history-db.js", "detection.js", "fs-switch.js", "cdr.js");
+importScripts("history-db.js", "detection.js", "fs-switch.js", "cdr.js", "collection-evening.js");
 try{importScripts("supabase-config.js", "history-cloud.js");}catch(error){console.warn("Supabase chưa cấu hình; dùng lịch sử trên máy.");}
 const DEFAULT_STATE = {
   autoEnabled: false,
@@ -219,6 +219,7 @@ async function executeAutoBlock(state,f,phone) {
   return !!f.incident.autoExecuted;
 }
 async function autoBlockNewAlerts(state) {
+  if(typeof runCollectionEvening==='function')await runCollectionEvening(state);
   let feature=await rotationFeature();
   if(typeof scheduleCdrChecks==='function')scheduleCdrChecks(state,feature);
   if(typeof FsSwitch!=='undefined'&&typeof processSwitch==='function'&&feature.enabled&&feature.mode==='AUTOMATIC'&&FsSwitch.plans(state,feature,Date.now()).length){
@@ -279,6 +280,7 @@ async function autoBlockNewAlerts(state) {
       Detection.event(state,'AUTO_PREVIEW',f,now,'Waiting for user confirmation: ACTIVE → BLOCKED');
     }
   }
+  if(typeof runCollectionEvening==='function')await runCollectionEvening(state);
   processingStatus(state,feature);
   return state;
 }
@@ -619,6 +621,6 @@ chrome.runtime.onInstalled.addListener(()=>{ensureOpenSipsAlarm().catch(()=>{});
 chrome.runtime.onStartup.addListener(()=>{ensureOpenSipsAlarm().catch(()=>{});});
 ensureOpenSipsAlarm().catch(()=>{});
 
-importScripts("cdr-worker.js", "fs-switch-worker.js");
+importScripts("cdr-worker.js", "fs-switch-worker.js", "collection-evening-worker.js");
 
 try{importScripts("telegram-worker.js");}catch(error){console.warn("Telegram bridge unavailable");}
