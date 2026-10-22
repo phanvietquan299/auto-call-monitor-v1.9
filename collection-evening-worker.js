@@ -4,24 +4,21 @@ async function runCollectionEvening(state){
  if(state.collectionEvening?.status==='RUNNING'){
   state.collectionEvening.status='FAILED';state.collectionEvening.error='Lịch Collection bị gián đoạn; kiểm tra Group ID trước khi tiếp tục.';state.importantFailures=[{id:'evening-interrupted-'+state.collectionEvening.date,fs:'Collection',at:Date.now(),title:'Lịch Collection bị gián đoạn',detail:state.collectionEvening.error},...(state.importantFailures||[])].slice(0,20);await saveState(state);return;
  }
+ // Retire the 17:00 consolidation state without changing any current Group ID.
+ if(state.collectionEvening&&state.collectionEvening.policy!==27&&!['NIGHT','RUNNING'].includes(state.collectionEvening.status)){
+  state.collectionEvening=null;await saveState(state);
+ }
  const time=CollectionEvening.phase(Date.now());
- if(time.consolidate&&state.collectionEvening?.date!==time.date&&state.collectionEvening?.status!=='RUNNING'&&state.collectionEvening?.status!=='FINAL_CONFIRMED'){
-  state.collectionEvening={date:time.date,status:'WAIT_LOCK'};Detection.applySchedule(state,Date.now());await saveState(state);
+ if(time.minute>=1080&&state.collectionEvening?.date!==time.date){
+  state.collectionEvening={policy:27,date:time.date,status:'WAIT_FINAL'};await saveState(state);
  }
  const final=CollectionEvening.finalChange(state,Date.now());
- if(final){state.collectionEvening={...state.collectionEvening,status:'FINAL_CONFIRMED',finalIncidentId:final.incidentId,finalAt:final.at,selected:final.selected};Detection.applySchedule(state,Date.now());await saveState(state);}
+ if(final){state.collectionEvening={policy:27,date:final.date,status:'FINAL_CONFIRMED',finalIncidentId:final.incidentId,finalAt:final.at};Detection.applySchedule(state,Date.now());await saveState(state);}
  const rotation=await chrome.storage.local.get('fsSwitch');
  if(['RUNNING','FAILED'].includes(rotation.fsSwitch?.operation?.status)||rotation.fsSwitch?.lastTest?.status==='RUNNING')return;
  const job=CollectionEvening.next(state,Date.now());if(!job)return;
- let tab,targetVerified=false;
+ let tab;
  await CollectionEvening.execute(state,job,{now:()=>Date.now(),save:saveState,setGroup:async(node,expected,value)=>{
-  if(job.kind==='CONSOLIDATE'&&!targetVerified){
-    const fsTab=await switchTab('http://10.10.101.67:5003/*');
-    const read=await switchCommand(fsTab,{type:'READ_FS_NUMBERS'});
-    const active=(read.numbers||[]).filter(n=>n.fs===job.selected.fs&&n.profile==='COLLECTION'&&n.status==='ACTIVE');
-    if(active.length!==1)throw Error('FS được chọn chưa có đúng một số ACTIVE; chưa gom Collection.');
-    targetVerified=true;
-  }
   if(tab==null)tab=await switchTab('http://10.10.99.153/*');
   const before=await switchCommand(tab,{type:'FS_SWITCH_READ_NODE',node});
   if(before.groupId===value)return; // A persisted step may already be applied.
