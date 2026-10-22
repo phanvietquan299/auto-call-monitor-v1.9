@@ -1,13 +1,19 @@
 """Build mobile shell using the actual desktop UI and validated flows."""
-import json,re
+import json,re,shutil
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent
 out=root/'mobile-app'
+ui=root/'src/ui'
+mobile=root/'src/mobile'
+out.mkdir(exist_ok=True)
+for name in ['adapter.js','sw.js','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png']:
+ shutil.copy2(mobile/name,out/name)
 version=json.loads((root/'manifest.json').read_text())['version']
-config=json.loads((root/'supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
+config=json.loads((root/'config/supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
 (out/'config.js').write_text('globalThis.MobileConfig='+json.dumps({'anonKey':config['anonKey']})+';\n')
-for name in ['dashboard.js','dashboard-fs-switch.js','fs-switch.js','history-export.js']:(out/name).write_text((root/name).read_text())
-s=(root/'dashboard.html').read_text().replace('<html lang="en">','<html lang="vi">')
+for name in ['dashboard.js','dashboard-fs-switch.js']:(out/name).write_text((ui/name).read_text())
+for name in ['fs-switch.js','history-export.js']:(out/name).write_text((root/'src/core'/name).read_text())
+s=(ui/'dashboard.html').read_text().replace('src="../core/','src="').replace('<html lang="en">','<html lang="vi">')
 s=s.replace('<title>Auto Call Monitor</title>','<title>Auto Call Monitor</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0d172b"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png">')
 s=s.replace('<body>','''<body>
 <div id="mobile-login" style="position:fixed;inset:0;z-index:100;background:#0d172b;display:grid;place-items:center;padding:24px"><div style="max-width:400px;text-align:center"><h1>AUTO CALL MONITOR</h1><p>Nhập mật khẩu để quản lý từ xa.</p><form id="mobile-password-login-form" style="display:grid;gap:10px"><label for="mobile-login-password">Mật khẩu</label><input id="mobile-login-password" type="password" required autocomplete="current-password" placeholder="Mật khẩu app" style="padding:12px;border-radius:10px;border:1px solid #3a4a62;background:#1b2940;color:white"><button id="mobile-password-login-submit" class="on" type="submit">Đăng nhập</button></form><p id="mobile-password-login-error" class="bad" role="status"></p><details style="margin-top:16px"><summary>Đăng nhập bằng liên kết</summary><a href="https://t.me/CallCenter16725bot?start=app" style="display:inline-block;background:#39d98a;color:#07130d;padding:14px 20px;border-radius:12px;text-decoration:none;font-weight:700">Mở bot · gửi /app</a><form id="mobile-login-form" style="display:grid;gap:10px;margin-top:20px"><label for="mobile-login-link">Hoặc dán liên kết từ bot</label><input id="mobile-login-link" type="password" required autocomplete="off" placeholder="Liên kết /app" style="padding:12px;border-radius:10px;border:1px solid #3a4a62;background:#1b2940;color:white"><button class="on" type="submit">Đăng nhập</button></form><p id="mobile-login-error" class="bad"></p></details><p class="muted" style="font-size:12px">Đặt mật khẩu một lần tại nút Mật khẩu app trên tool hoặc sau khi đăng nhập bằng liên kết.</p><p class="muted" style="font-size:12px">Safari → Chia sẻ → Thêm vào Màn hình chính</p></div></div>

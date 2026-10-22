@@ -1,0 +1,48 @@
+DEPLOYMENT — feat/deploy
+
+Vercel hosts the mobile app UI only. Deploying the UI does not move the
+Chrome extension worker off the Mac and does not provide access to 10.10.x.x.
+
+Vercel setup:
+- Import this repository, select feat/deploy for a preview deployment.
+- Framework: Other. Root directory: repository root.
+- No build command; output directory: mobile-app (set in vercel.json).
+- Deploy the already generated public assets; no Supabase PAT, bot token,
+  history token, password or secret environment variables are needed.
+- Keep the existing production branch and GitHub Pages deployment unchanged.
+- Existing login links point to GitHub Pages. On a Vercel preview, use the
+  password login already configured for this app; sessions are per origin.
+
+Always-on processing requires a separate machine/server running the extension
+and authenticated OpenSIPS/FreeSWITCH tabs, with access to the internal network.
+A cloud server needs its own VPN/private route that stays up without the Mac.
+Do not start a second active worker against production while the Mac controls it.
+Use a separate test backend before validating any new worker implementation.
+
+This branch prepares hosting only. No production deployment, database change,
+worker migration or live FreeSWITCH/OpenSIPS action has been performed.
+
+Repeatable preview upload:
+  python3 scripts/deploy-vercel.py --dry-run
+  python3 scripts/deploy-vercel.py --project <existing-project-id-or-name>
+  Add --team-id <team-id> for a team-owned project.
+The token is read locally from ignored vercel_key.md; only allowlisted public
+assets are uploaded. The script never deploys a production target.
+
+Deployment status (2026-10-16):
+- Project: callcenter
+- Branch: feat/deploy
+- Preview ID: dpl_HZ4TX3s9yEAcMN2TApCidcveR4KM
+- URL: https://callcenter-ky13yexs5-zit-qan.vercel.app
+- Vercel API state: READY; target is preview (not production).
+- Uploaded 11 public mobile assets and vercel.json only.
+- Project has Vercel Authentication enabled and an existing production target.
+  Public requests redirect to Vercel Login. Authentication settings were kept.
+- Existing GitHub Pages, production aliases, Supabase and Chrome worker were not
+  changed by this deployment. No OpenSIPS/FreeSWITCH actions were executed.
+- The preview uses the existing app backend configuration; authenticated control
+  actions would target the existing runtime, not a separate test system.
+
+Project ID and Team ID are read from ignored vercel_key.md. Tokens are never
+uploaded. Readiness was checked via the API and the public authentication gate
+was verified. End-to-end login/control on this protected URL was not exercised.

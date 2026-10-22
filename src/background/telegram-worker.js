@@ -5,7 +5,7 @@
  let busy=false,lastNoticeAt=0,publishing=false,devicePromise;
  let lastSyncError='',lastPublishedAt=0;
  function remoteUrl(){
-  if(typeof config.anonKey!=='string'||!config.anonKey.trim())throw Error('Thiếu public API key Supabase; kiểm tra supabase-config.js');
+  if(typeof config.anonKey!=='string'||!config.anonKey.trim())throw Error('Thiếu public API key Supabase; kiểm tra config/supabase-config.js');
   const url=new URL(config.url+'/rest/v1/rpc/call_monitor_remote');
   // Public anon key fallback for gateways that omit custom request headers.
   url.searchParams.set('apikey',config.anonKey);return url.href;

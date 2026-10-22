@@ -6,7 +6,7 @@
 
 /supabase.md
 
-/supabase-config.js
+/config/supabase-config.js
 
 *.md
 
@@ -19,3 +19,10 @@
 
 # macOS metadata
 .DS_Store
+
+# Local development dependencies and browser artifacts
+/node_modules/
+/test-results/
+/playwright-report/
+__pycache__/
+*.pyc

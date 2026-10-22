@@ -1,5 +1,5 @@
-importScripts("history-db.js", "detection.js", "fs-switch.js", "cdr.js", "collection-evening.js");
-try{importScripts("supabase-config.js", "history-cloud.js");}catch(error){console.warn("Supabase chưa cấu hình; dùng lịch sử trên máy.");}
+importScripts("history-db.js", "../core/detection.js", "../core/fs-switch.js", "../core/cdr.js", "../core/collection-evening.js");
+try{importScripts("../../config/supabase-config.js", "history-cloud.js");}catch(error){console.warn("Supabase chưa cấu hình; dùng lịch sử trên máy.");}
 const DEFAULT_STATE = {
   autoEnabled: false,
   autoBlockMode: "MANUAL",
@@ -576,7 +576,7 @@ chrome.runtime.onMessage.addListener(handleMainMessage);
 
 // Open/focus the dashboard as a normal Chrome tab.
 chrome.action.onClicked.addListener(async()=>{
-  const url=chrome.runtime.getURL("dashboard.html");
+  const url=chrome.runtime.getURL("src/ui/dashboard.html");
   const tabs=await chrome.tabs.query({url});
   if(tabs.length){await chrome.tabs.update(tabs[0].id,{active:true});await chrome.windows.update(tabs[0].windowId,{focused:true});}
   else await chrome.tabs.create({url});

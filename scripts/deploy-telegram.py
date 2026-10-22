@@ -6,7 +6,7 @@ pat=re.search(r'sbp_[A-Za-z0-9]+',(root/'supabase.md').read_text()).group()
 s=(root/'telegrambot.md').read_text()
 bot=re.search(r'\b\d{6,12}:[A-Za-z0-9_-]{25,}\b',s).group()
 chat=re.search(r'(?im)^\s*id\s*:\s*(-?\d+)',s).group(1)
-config=json.loads((root/'supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
+config=json.loads((root/'config/supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
 ref=config['url'].split('//')[1].split('.')[0]
 def req(url,data=None,headers=None):
  try:

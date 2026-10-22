@@ -1,0 +1,70 @@
+KIẾN TRÚC AUTO CALL MONITOR
+
+1. ĐIỂM VÀO
+manifest.json nằm ở gốc để Chrome tải extension như trước.
+Service worker: src/background/background.js.
+Dashboard: src/ui/dashboard.html. Mở bằng biểu tượng extension.
+Các content script được khai báo ở manifest theo đúng thứ tự phụ thuộc.
+
+2. LUỒNG DỮ LIỆU
+OpenSIPS / FreeSWITCH / Grafana
+  → src/content: đọc trang, gửi snapshot và nhận lệnh thao tác.
+  → src/background: hàng đợi điều phối, lưu trạng thái, xác minh kết quả.
+  → src/core: đánh giá VT + CDR, baseline, locked, dự phòng, chọn FS, lịch.
+  → src/ui: hiển thị trạng thái và gửi yêu cầu điều khiển.
+  → Supabase: lịch sử, snapshot điện thoại và lệnh điều khiển từ xa.
+  → src/mobile/adapter.js: chuyển API giao diện Chrome sang remote API.
+
+Worker dùng importScripts với đường dẫn tương đối từ src/background.
+Core dùng UMD để chạy chung trên Chrome, app điện thoại và Node test.
+Content script làm việc với DOM của trang, không nhập module Node.
+Các file worker dùng chung global scope để giữ thứ tự và hàng đợi đang vận hành;
+việc sắp xếp này không chuyển sang ES modules hay đổi quy tắc xử lý locked.
+
+3. CÁC FILE CHÍNH
+src/core/detection.js: baseline, VT + CDR, trạng thái và ngưỡng xử lý.
+src/core/cdr.js: phân tích CDR và chuỗi lỗi.
+src/core/fs-switch.js: kế hoạch thay FS theo BACKUP/đặt trước.
+src/core/collection-evening.js: sau 18:00 chờ lượt locked cuối thành công.
+src/core/history-export.js: tạo Excel.
+
+src/background/background.js: state, lịch, message queue và AUTO BLOCK.
+src/background/cdr-worker.js: điều phối lượt lấy CDR.
+src/background/fs-switch-worker.js: bật/tắt/thay FS và xác minh Reload.
+src/background/collection-evening-worker.js: thực thi nghỉ đêm Collection.
+src/background/history-db.js: bộ đệm/outbox IndexedDB.
+src/background/history-cloud.js: đồng bộ lịch sử Supabase.
+src/background/telegram-worker.js: remote bridge và snapshot app.
+
+src/content/opensips-page.js: nhận diện trang Load Balancer/CDR và refresh.
+src/content/opensips.js: lấy VT/Group ID.
+src/content/cdr-viewer.js: đọc/lọc CDR.
+src/content/fs-switch-opensips.js: Save/Reload/xác minh Group ID.
+src/content/freeswitch.js: số điện thoại, BACKUP và thay trạng thái số.
+src/content/grafana.js: traffic tham khảo.
+
+4. BUILD APP ĐIỆN THOẠI
+Nguồn dùng chung: src/ui và src/core.
+Nguồn riêng PWA: src/mobile (adapter, manifest, service worker, icon).
+Lệnh: python3 scripts/build-mobile.py
+Đầu ra: mobile-app; giữ các URL asset phẳng hiện tại để không đổi liên kết app.
+Build chép source, tạo index.html, đưa public anon key vào config.js và gắn version.
+Không chỉnh dashboard.js/index.html/adapter.js trong mobile-app trực tiếp.
+Cấu hình private chỉ đọc từ config/supabase-config.js; build chỉ xuất anonKey.
+
+5. SUPABASE VÀ DEPLOY
+supabase/*.sql: schema lịch sử, remote control và mobile.
+supabase/functions/telegram-control/index.ts: Edge Function.
+scripts/deploy-telegram.py: deploy schema/function và cấu hình bot.
+scripts/publish-mobile.py: publish tài nguyên public mobile lên gh-pages.
+scripts/deploy-vercel.py: preview Vercel với danh sách file public cho phép.
+vercel.json giữ outputDirectory = mobile-app; không thay hạ tầng trong lần sắp xếp này.
+
+6. KIỂM TRA VÀ QUY TẮC SỬA
+python3 scripts/check-layout.py: kiểm tra manifest, imports, HTML, build output, secrets ignore.
+npm ci: cài đúng dependency local theo package-lock.json, không phụ thuộc /tmp.
+npm run check:browser: Chrome profile riêng, offline và proxy đóng; kiểm tra worker/dashboard thật.
+npm test (node --test tests/*.test.js): toàn bộ mô phỏng; không thao tác FS/OpenSIPS thật.
+Test local nằm trong tests, import/read source ở src theo đường dẫn mới.
+Khi đổi đường dẫn, cập nhật manifest, worker imports, HTML, build, test và tài liệu.
+Quy tắc làm việc tại AGENTS.md; không tự động commit khi chưa được yêu cầu.

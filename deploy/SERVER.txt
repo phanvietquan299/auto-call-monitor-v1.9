@@ -1,0 +1,40 @@
+SERVER MIGRATION — feat/deploy
+
+Status: no server has been provisioned. The Vercel preview hosts the UI only.
+This checklist is preparation, not a running always-on worker.
+
+Required before installation:
+1. A Linux or Windows machine that remains on. For planning, budget 2 CPU cores,
+   4 GB RAM and 20 GB disk; actual browser use must be measured before approval.
+   A company LAN machine avoids the need to route private IPs through a cloud VPN.
+2. Access to the machine (SSH for Linux or remote desktop for Windows).
+   Keep passwords and SSH private keys out of chat and source control.
+3. Connectivity from THAT machine to the four services in check-network.py.
+   An external VPS needs a company-approved VPN/private route that does not
+   terminate on the Mac being shut down. Wi-Fi on the phone is not that route.
+4. Login to both OpenSIPS hosts and FreeSWITCH/Grafana as needed. Browser sessions
+   must be established on the server; do not copy an entire personal Mac profile.
+5. Private Supabase runtime configuration mounted separately from public app files.
+   Never upload supabase-config.js, tokens or login passwords to Vercel.
+
+Run from the proposed server:
+  python3 deploy/check-network.py
+A reachable result only verifies TCP/HTTP, not authentication, correct data,
+permission to change status, or availability of the whole detection flow.
+
+Migration order:
+- Prepare a separate browser profile and isolated test Supabase backend.
+- Start with MONITORING/AUTO BLOCK/THAY FS off and no production bridge credentials.
+- Verify Group IDs, VT refresh, CDR refresh, number status and exact target checks.
+- Verify restart/session persistence and stale-data/connection-loss behavior.
+- Only then transfer ownership: stop the Mac worker before activating the server.
+  Do not run two live controllers against the same FreeSWITCH/OpenSIPS.
+- Point the app to the intended runtime; verify heartbeat and one agreed action.
+- Keep the old profile/config for rollback; stop server actions before reverting.
+
+Still needed from the owner:
+- A server in the company LAN, or approved VPS budget and an independent VPN.
+- OS/access details and successful network preflight from that server.
+
+No paid server purchase, production migration, live FS action or backend
+configuration change is authorized by this preparation alone.
