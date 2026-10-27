@@ -351,8 +351,8 @@ async function render(){
 
   let groups="";
   for(const g of ["99.153","99.155"]){
-    const gr=s.grafana[g]||{}, os=s.opensips[g]||{};
-    groups+=`<div class="card"><div class="node-group-heading"><b>${g==='99.153'?'Collection':'Sale'} · ${g}</b><button class="secondary" data-add-node="${g}">Thêm node</button></div>Traffic (tham khảo): <b>${gr.value??"-"}</b> <span class="muted">(${age(gr.updatedAt)})</span>
+    const os=s.opensips[g]||{};
+    groups+=`<div class="card"><div class="node-group-heading"><b>${g==='99.153'?'Collection':'Sale'} · ${g}</b><button class="secondary" data-add-node="${g}">Thêm node</button></div>
     <div class="table-wrap"><table><tr><th>FS</th><th>IP</th><th>VT</th><th>State</th><th>Dãy CDR</th><th>Số lần liên tiếp</th><th>Incident / Recovery</th><th>Profile</th></tr>`;
     for(const n of FsSwitch.displayRows(s,g)){
       const tc=n.trend==="DOWN"?"down":n.trend==="UP"?"up":"";

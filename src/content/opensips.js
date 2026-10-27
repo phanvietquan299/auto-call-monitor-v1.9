@@ -1,3 +1,7 @@
+// Tác dụng: Xác nhận content script còn kết nối sau khi bật/reload extension.
+chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{
+  if(msg.type==='MONITOR_CONTENT_READY'){reply({ok:true,ready:true});return false;}
+});
 (/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ () => {
   const GROUP = location.hostname === "10.10.99.153" ? "99.153" :
                 location.hostname === "10.10.99.155" ? "99.155" : null;

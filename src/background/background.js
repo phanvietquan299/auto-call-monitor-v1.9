@@ -322,6 +322,8 @@ let messageQueue=Promise.resolve();
 /** Tác dụng: Tiếp nhận lệnh dashboard/content script, tuần tự hóa thay đổi và trả kết quả cho bên gọi. */
 function handleMainMessage(msg,sender,sendResponse){
   if(msg.type?.startsWith('FS_SWITCH_'))return;
+  // Bỏ qua mẫu Grafana từ tab cũ, không đọc/ghi storage hay chạy detection.
+  if(msg.type==='GRAFANA_SAMPLE'){sendResponse({ok:true,ignored:true});return;}
   if(msg.type==='HISTORY_READ'&&typeof CloudHistory!=='undefined'){
     if(msg.date&&!/^\d{4}-\d{2}-\d{2}$/.test(msg.date)){sendResponse({ok:false,error:'Ngày không hợp lệ'});return;}
     HistoryDB.read(msg.date||'').then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong handleMainMessage. */ events=>sendResponse({ok:true,events,sync:CloudHistory.status()})).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ trong handleMainMessage. */ error=>sendResponse({ok:false,error:String(error)}));return true;
@@ -519,13 +521,6 @@ function handleMainMessage(msg,sender,sendResponse){
       return;
     }
 
-    if(msg.type==="GRAFANA_SAMPLE"){
-      for(const [group,value] of Object.entries(msg.values||{})){
-        if(!state.grafana[group]) continue;
-        Detection.grafana(state,group,Number(value),Date.now());
-      }
-    }
-
     if(msg.type==="OPENSIPS_SAMPLE"){
       const group=msg.group;
       if(state.opensips[group] && msg.diagnostic?.tableFound && msg.diagnostic?.httpStatus===200){
@@ -611,8 +606,27 @@ function handleMainMessage(msg,sender,sendResponse){
 }
 chrome.runtime.onMessage.addListener(handleMainMessage);
 
+let sourceTabRecovery=null;
+/** Tác dụng: Tải lại tab nguồn thiếu content script sau bật/reload; giữ tab đã kết nối khi worker thức lại. */
+function recoverSourceTabs(){
+  if(sourceTabRecovery)return sourceTabRecovery;
+  sourceTabRecovery=(async()=>{
+    const urls=['http://10.10.99.153/*','http://10.10.99.155/*','http://10.10.101.67:5003/*'];
+    const tabs=await chrome.tabs.query({url:urls});
+    await Promise.allSettled(tabs.filter(t=>t.id!=null&&t.status!=='loading'&&urls.some(pattern=>t.url?.startsWith(pattern.slice(0,-1)))).map(async tab=>{
+      let ready=false;
+      try{const result=await chrome.tabs.sendMessage(tab.id,{type:'MONITOR_CONTENT_READY'});ready=result?.ok===true&&result.ready===true;}catch{}
+      if(!ready)await chrome.tabs.reload(tab.id);
+    }));
+  })().catch(error=>console.warn('Không thể làm mới tab nguồn:',String(error.message||error))).finally(()=>{sourceTabRecovery=null;});
+  return sourceTabRecovery;
+}
+// Không dùng storage làm cờ: worker có thể thức lại nhiều lần, nhưng tab đã kết nối không bị reload lặp.
+if(chrome.runtime.id)recoverSourceTabs();
+
 // Open/focus the dashboard as a normal Chrome tab.
 chrome.action.onClicked.addListener(/** Tác dụng: Mở dashboard extension khi người dùng bấm biểu tượng tool. */ async()=>{
+  await recoverSourceTabs();
   const url=chrome.runtime.getURL("src/ui/dashboard.html");
   const tabs=await chrome.tabs.query({url});
   if(tabs.length){await chrome.tabs.update(tabs[0].id,{active:true});await chrome.windows.update(tabs[0].windowId,{focused:true});}

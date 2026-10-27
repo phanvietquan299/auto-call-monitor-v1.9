@@ -12,13 +12,12 @@ function esc(s){return String(s ?? "").replace(/[&<>"]/g,/** Tác dụng: Thay k
 async function render(){
   const s=await state();
   const app=document.querySelector("#app");
-  if(!s){app.innerHTML='<div class="card">Open Grafana, OpenSIPS .153/.155 and FreeSWITCH tabs first.</div>';return;}
+  if(!s){app.innerHTML='<div class="card">Open OpenSIPS .153/.155 and FreeSWITCH tabs first.</div>';return;}
 
   let html="";
   for(const g of ["99.153","99.155"]){
-    const gr=s.grafana[g]||{}, os=s.opensips[g]||{};
-    html+=`<div class="card"><b>${g}</b> Traffic: <b>${gr.value ?? "-"}</b>
-      <span class="muted">(${age(gr.updatedAt)})</span><table>
+    const os=s.opensips[g]||{};
+    html+=`<div class="card"><b>${g}</b><table>
       <tr><th>FS</th><th>IP</th><th>VT</th><th>Profile</th></tr>`;
     for(const n of (os.nodes||[]).filter(n=>!Array.isArray(s.nodeDisplay?.[g])||s.nodeDisplay[g].includes(n.ip))){
       html+=`<tr><td>${esc(n.fs||"?")}</td><td>${esc(n.ip)}</td><td>${n.used}/${n.capacity}</td><td>${esc(n.description)}</td></tr>`;
