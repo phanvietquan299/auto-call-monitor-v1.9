@@ -7,6 +7,7 @@
     `${location.protocol}//${location.host}/cp/tools/system/loadbalancer/loadbalancer.php?action=add`;
 
   const IP_TO_FS = {
+    "10.10.99.140":"OS01",
     "10.10.101.176":"FS01","10.10.101.170":"FS02",
     "10.10.101.184":"FS03","10.10.101.180":"FS04",
     "10.10.101.58":"FS05","10.10.101.87":"FS06",
@@ -15,7 +16,7 @@
   };
 
   const TARGET = GROUP === "99.153"
-    ? new Set(["10.10.101.176","10.10.101.170","10.10.101.184","10.10.101.180"])
+    ? new Set(["10.10.99.140","10.10.101.176","10.10.101.170","10.10.101.184","10.10.101.180"])
     : new Set(["10.10.101.58","10.10.101.87","10.10.101.88","10.10.101.89","10.10.101.90"]);
 
   const histories = new Map();
@@ -33,18 +34,19 @@
     const table = doc.querySelector("table.ttable");
     if (!table) return {nodes:[], tableFound:false, rows:0};
 
-    const nodes=[];
+    const nodes=[],catalog=[];
     for (const row of [...table.rows]) {
-      const text=(row.textContent||"").replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
-      const im=text.match(/sip:(10\.10\.101\.\d+)(?::\d+)?/i);
+      const text=(row.cells?[...row.cells].map(c=>c.textContent||'').join(' '):(row.textContent||"" )).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
+      const im=text.match(/sip:((?:\d{1,3}\.){3}\d{1,3})(?::\d+)?/i);
       const vm=text.match(/\bvt\s*=\s*(\d+)\s*\/\s*(\d+)/i);
-      if (!im || !vm || !TARGET.has(im[1])) continue;
+      if (!im) continue;
 
-      const ip=im[1], used=Number(vm[1]), capacity=Number(vm[2]);
-      const h=histories.get(ip)||[];
+      const ip=im[1], used=vm?Number(vm[1]):null, capacity=vm?Number(vm[2]):null;
+      const historyKey=ip+'|'+(row.cells?.[0]?.textContent||'');
+      const h=histories.get(historyKey)||[];
       h.push(used);
       while(h.length>12) h.shift();
-      histories.set(ip,h);
+      histories.set(historyKey,h);
 
       let trend="STABLE";
       if(h.length>=4){
@@ -54,15 +56,16 @@
         else if(d>=Math.max(20,capacity*.05)) trend="UP";
       }
 
-      nodes.push({
-        fs:IP_TO_FS[ip]||null, ip, used, capacity, resource:"vt",
+      catalog.push({
+        fs:IP_TO_FS[ip]||null, fsHint:text.match(/\b(?:FS|OS)\d+\b/i)?.[0]?.toUpperCase()||null, ip, used, capacity, resource:vm?"vt":null,
         destinationId:/^\d+$/.test((row.cells?.[0]?.textContent||'').trim())?Number(row.cells[0].textContent.trim()):null,
         groupId:/^\d*$/.test((row.cells?.[1]?.textContent??'invalid').trim())?Number(row.cells[1].textContent.trim()):null,
         description:GROUP==="99.153"?"Collection":"TeleSale",
         trend, history:[...h]
       });
     }
-    return {nodes, tableFound:true, rows:table.rows.length};
+    for(const n of catalog)if(TARGET.has(n.ip)&&n.resource==='vt')nodes.push(n);
+    return {nodes,catalog, tableFound:true, rows:table.rows.length};
   }
 
   async function poll(){
@@ -87,6 +90,7 @@
         type:"OPENSIPS_SAMPLE",
         group:GROUP,
         nodes:parsed.nodes,
+        catalog:parsed.catalog,
         diagnostic:{
           version:"1.5.0",
           httpStatus:res.status,
@@ -112,6 +116,13 @@
   }).catch(()=>{ poll(); });
 
   chrome.runtime.onMessage.addListener((msg,_sender,reply) => {
+    if(msg.type==='OPENSIPS_LIST_NODES'){
+      if(globalThis.fsSwitchBusy){reply({ok:false,error:'Đang chuyển FS; thử tải lại sau'});return;}
+      fetch(ENDPOINT,{method:'POST',credentials:'include',cache:'no-store',signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'refresh='+encodeURIComponent('Refresh from Server')})
+        .then(async res=>{if(!res.ok)throw Error('OpenSIPS HTTP '+res.status);const parsed=parse(await res.text());if(!parsed.tableFound)throw Error('Không đọc được bảng Load Balancer; kiểm tra đăng nhập');return {ok:true,group:GROUP,catalog:parsed.catalog};})
+        .then(reply).catch(error=>reply({ok:false,error:String(error.message||error)}));return true;
+    }
+
     if(msg.type==="OPENSIPS_POLL_NOW"){
       poll().then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:String(e)}));return true;
     }

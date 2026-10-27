@@ -16,7 +16,7 @@
       const select=td[3].querySelector("select");
       const status=(select?.value||"").trim().toUpperCase();
 
-      if(phone&&/^FS\d+$/i.test(fs)) out.push({phone,fs,profile,status,hasStatusControl:!!select&&!select.disabled});
+      if(phone&&/^(?:FS|OS)\d+$/i.test(fs)) out.push({phone,fs,profile,status,hasStatusControl:!!select&&!select.disabled});
     }
     return out;
   }
@@ -34,13 +34,31 @@
       for(const row of rows){
         const cells=[...row.children],name=(cells[fsIndex]?.innerText||cells[fsIndex]?.textContent||'').trim().toUpperCase();
         const value=(cells[backupIndex]?.innerText||cells[backupIndex]?.textContent||'').trim();
-        if(/^FS\d+$/.test(name)&&/^\d+$/.test(value))nodes.push({fs:name,backups:Number(value)});
+        if(/^(?:FS|OS)\d+$/.test(name)&&/^\d+$/.test(value))nodes.push({fs:name,backups:Number(value)});
       }
     }
     return nodes;
   }
+  function parseNodeMappings(){
+    const mappings=[];
+    for(const table of document.querySelectorAll('table')){
+      if(typeof table.querySelectorAll!=='function')continue;
+      const rows=[...table.querySelectorAll('tr')];
+      const header=rows.find(r=>/NODE\s*ID/i.test(r.innerText||r.textContent||''));if(!header)continue;
+      const labels=[...header.children].map(c=>(c.innerText||c.textContent||'').trim().toUpperCase());
+      const nameIndex=labels.findIndex(x=>/^NODE\s*ID$/.test(x));
+      const ipIndex=labels.findIndex(x=>/^(?:IP|IP ADDRESS|SIP URI|HOST|HOSTNAME)$/.test(x));
+      if(nameIndex<0||ipIndex<0)continue;
+      for(const row of rows){
+        const cells=[...row.children],name=(cells[nameIndex]?.innerText||cells[nameIndex]?.textContent||'').trim().toUpperCase();
+        const ip=(cells[ipIndex]?.innerText||cells[ipIndex]?.textContent||'').match(/(?:\d{1,3}\.){3}\d{1,3}/)?.[0];
+        if(/^(?:FS|OS)\d+$/.test(name)&&ip)mappings.push({fs:name,ip});
+      }
+    }
+    return mappings;
+  }
   function publish(){
-    send({type:"FREESWITCH_SAMPLE",data:{numbers:parseNumbers(),backupSummary:parseBackupSummary()}});
+    send({type:"FREESWITCH_SAMPLE",data:{numbers:parseNumbers(),backupSummary:parseBackupSummary(),nodeMappings:parseNodeMappings()}});
   }
 
   chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{

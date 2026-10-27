@@ -46,7 +46,7 @@
       const age=Date.now()-(snapshot.nodes?.[group]?.updatedAt||0),fresh=age>=0&&age<45000;
       const id=rows.length===1?rows[0].groupId:null;
       const known=fresh&&[0,policy.groupId].includes(id),active=known&&id===policy.groupId;
-      return `<button type="button" data-node-fs="${fs}" data-node-group="${group}" data-node-expected="${id}" class="${known?(active?'on':'off'):'secondary'}" aria-label="${fs}: ${known?(active?'đang hoạt động, bấm để tắt':'đang tắt, bấm để bật'):'chưa xác minh'}" aria-pressed="${active}" ${!known||busy?'disabled':''}>${Number(fs.slice(2))}</button>`;
+      return `<button type="button" data-node-fs="${fs}" data-node-group="${group}" data-node-expected="${id}" class="${known?(active?'on':'off'):'secondary'}" aria-label="${fs}: ${known?(active?'đang hoạt động, bấm để tắt':'đang tắt, bấm để bật'):'chưa xác minh'}" aria-pressed="${active}" ${!known||busy?'disabled':''}>${fs==='OS01'?'OS01':Number(fs.slice(2))}</button>`;
     }).join('')}<button type="button" class="secondary" data-node-reload="${group}" ${busy?'disabled':''}>Reload on Server</button></div>`).join('');
     const target=el('fs-node-buttons');if(target.innerHTML!==html)target.innerHTML=html;
   }

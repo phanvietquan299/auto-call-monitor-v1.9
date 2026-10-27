@@ -2,7 +2,7 @@
 (function(root){
   const detection=root.Detection||(typeof require==='function'?require('./detection'):null);
   const groups={
-    '99.153':{profile:'COLLECTION',groupId:2,fs:['FS01','FS02','FS03','FS04']},
+    '99.153':{profile:'COLLECTION',groupId:2,fs:['FS01','FS02','FS03','FS04','OS01']},
     '99.155':{profile:'TELESALE',groupId:3,fs:['FS05','FS06','FS07']}
   };
   const BACKUP_THRESHOLD=10;
@@ -128,6 +128,39 @@
     feature.history=[op,...(feature.history||[])].filter(x=>x.startedAt>deps.now()-3*86400000);
     await deps.save(feature);return op;
   }
-  const api={backupCount,threshold,BACKUP_THRESHOLD,groups,plans,diagnostics,holds,identity,execute};
+  // A destination is identified by ID, while the dashboard shows one row per IP.
+  function catalogRows(rows,group){
+    const expected=group==='99.153'?2:3,buckets=new Map();
+    for(const n of rows||[]){if(!n.ip)continue;const list=buckets.get(n.ip)||[];
+      if(!list.some(x=>x.destinationId===n.destinationId&&x.groupId===n.groupId))list.push(n);buckets.set(n.ip,list);}
+    return [...buckets.values()].map(list=>{
+      const rank=n=>n.groupId===expected?0:n.groupId===0?1:2;
+      list.sort((a,b)=>rank(a)-rank(b)||(b.capacity||0)-(a.capacity||0)||(a.destinationId||0)-(b.destinationId||0));
+      const first=list[0],ambiguous=!!first.ambiguous||list.filter(n=>rank(n)===rank(first)).length>1;
+      return {...first,ambiguous,destinations:list.flatMap(n=>n.destinations||[{id:n.destinationId,groupId:n.groupId,capacity:n.capacity}])};
+    });
+  }
+  function nodeCatalog(state,group){
+    const data=state.opensips?.[group]||{},profile=groups[group]?.profile;
+    const inventory=(state.freeswitch?.numbers||[]).filter(n=>n.profile===profile);
+    return catalogRows(data.catalog||data.nodes,group).map(n=>{
+      const matches=(state.freeswitch?.nodeMappings||[]).filter(x=>x.ip===n.ip&&(!x.profile||x.profile===profile));
+      const names=[...new Set(matches.map(x=>x.fs))];
+      const fs=names.length===1?names[0]:n.fs||(inventory.some(x=>x.fs===n.fsHint)?n.fsHint:null);
+      return {...n,fs,displayOnly:!!n.ambiguous||!(data.nodes||[]).some(x=>x.ip===n.ip&&x.fs===fs)};
+    });
+  }
+  function displayRows(state,group){
+    const data=state.opensips?.[group]||{},selected=state.nodeDisplay?.[group];
+    const rows=nodeCatalog(state,group);
+    return rows.filter(n=>Array.isArray(selected)?selected.includes(n.ip):(data.nodes||[]).some(x=>x.ip===n.ip));
+  }
+  function validateDisplayIps(state,group,ips,previous=[]){
+    if(!groups[group]||!Array.isArray(ips)||ips.length>500)throw Error('Danh sách node không hợp lệ');
+    const allowed=new Set([...nodeCatalog(state,group).map(n=>n.ip),...previous]);
+    if(ips.some(ip=>typeof ip!=='string'||!allowed.has(ip)))throw Error('Node chưa có trong danh sách OpenSIPS của nhóm');
+    return [...new Set(ips)];
+  }
+  const api={catalogRows,nodeCatalog,displayRows,validateDisplayIps,backupCount,threshold,BACKUP_THRESHOLD,groups,plans,diagnostics,holds,identity,execute};
   if(typeof module!=='undefined')module.exports=api;else root.FsSwitch=api;
 })(globalThis);

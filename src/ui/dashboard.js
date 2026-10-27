@@ -4,6 +4,7 @@ async function getState(){
 }
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const manualStatusBusy=new Set();
+const manualStatusNotes=new Map();
 function fsRoutingActive(s,fs,profile){
  const group=profile==='COLLECTION'?'99.153':'99.155',data=s.opensips?.[group];
  const age=Date.now()-(data?.updatedAt||0),nodes=(data?.nodes||[]).filter(n=>n.fs===fs);
@@ -14,7 +15,8 @@ function manualStatusControl(s,fs,profile){
  const row=s.freeswitch?.displayNumbers?.[fs]||(rows.length===1?rows[0]:null);
  if(!row)return `<div class="fs-phone-status muted"><span>Chờ số điện thoại</span><button class="secondary" data-refresh-phone="${esc(fs)}">Đọc lại số</button><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" disabled><option value="" selected>Chờ cập nhật số…</option><option value="ACTIVE">⚪ ACTIVE</option><option value="BACKUP">🔵 BACKUP</option><option value="BLOCKED">🔴 BLOCKED</option></select></div>`;
  const busy=manualStatusBusy.has(fs),active=fsRoutingActive(s,fs,profile);
- return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':''}</div>`;
+ const note=manualStatusNotes.get(fs),noteHtml=note&&Date.now()<note.until?`<small class="${note.error?'bad':'good'}">${esc(note.text)}</small>`:'';
+ return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':noteHtml}</div>`;
 }
 document.querySelector('#groups').addEventListener('click',async event=>{
  const button=event.target.closest('[data-refresh-phone]');if(!button)return;
@@ -22,6 +24,47 @@ document.querySelector('#groups').addEventListener('click',async event=>{
  try{const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs:button.dataset.refreshPhone,refresh:true});if(!result?.ok)throw Error(result?.error||'Chưa đọc được số.');confirmationNotice('Đã đọc lại số FreeSWITCH.');}
  catch(error){confirmationNotice(error.message);}finally{button.disabled=false;render().catch(()=>{});}
 });
+let nodePickerGroup=null,nodePickerState=null,nodePickerRows=[],nodePickerBusy=false;
+const nodePickerDialog=document.querySelector('#node-picker-dialog');
+function drawNodePicker(){
+ const group=nodePickerGroup,data=nodePickerState?.opensips?.[group]||{};
+ nodePickerRows=FsSwitch.nodeCatalog(nodePickerState||{},group);
+ const selected=nodePickerState?.nodeDisplay?.[group];
+ document.querySelector('#node-picker-title').textContent=`Thêm node · ${group==='99.153'?'Collection':'Sale'}`;
+ document.querySelector('#node-picker-list').innerHTML=nodePickerRows.map((n,index)=>{
+  const checked=Array.isArray(selected)?selected.includes(n.ip):(data.nodes||[]).some(x=>x.ip===n.ip);
+  const destinations=n.destinations.map(d=>`ID ${d.id??'—'} · Group ${d.groupId??'—'}`).join(' / ');
+  return `<label class="node-picker-item"><input type="checkbox" data-node-pick="${index}" ${checked?'checked':''}><span><b>${esc(n.fs||'Chưa ghép tên FS')}</b> · ${esc(n.ip)}<small>${esc(destinations)}${n.ambiguous?' · Nhiều destination chưa phân biệt':''}${!n.fs?' · OpenSIPS/FreeSWITCH chưa cung cấp tên tương ứng':''}</small></span></label>`;
+ }).join('')||'<p class="muted">Chưa có dữ liệu node. Mở tab OpenSIPS đã đăng nhập rồi tải lại.</p>';
+}
+function nodePickerSetBusy(value){nodePickerBusy=value;for(const id of ['node-picker-refresh','node-picker-save'])document.getElementById(id).disabled=value;}
+async function loadNodePicker(){
+ if(nodePickerBusy)return;nodePickerSetBusy(true);document.querySelector('#node-picker-status').textContent='Đang tải node từ OpenSIPS…';
+ try{
+  const r=await chrome.runtime.sendMessage({type:'FS_SWITCH_SETTINGS',refreshGroup:nodePickerGroup});
+  if(!r?.ok)throw Error(r?.error||'Không tải được node');
+  nodePickerState=r.state||await getState();
+  if(r.nodePicker){nodePickerState.opensips[nodePickerGroup].catalog=r.nodePicker.catalog;nodePickerState.nodeDisplay=r.nodePicker.nodeDisplay;}
+  drawNodePicker();document.querySelector('#node-picker-status').textContent=`Đã tải ${nodePickerRows.length} node.`;
+ }catch(e){document.querySelector('#node-picker-status').textContent=e.message;}
+ finally{nodePickerSetBusy(false);}
+}
+document.querySelector('#groups').addEventListener('click',async event=>{
+ const button=event.target.closest('[data-add-node]');if(!button||nodePickerBusy)return;
+ nodePickerGroup=button.dataset.addNode;nodePickerState=await getState();drawNodePicker();nodePickerDialog.showModal();loadNodePicker();
+});
+document.querySelector('#node-picker-refresh').onclick=loadNodePicker;
+document.querySelector('#node-picker-cancel').onclick=()=>nodePickerDialog.close();
+document.querySelector('#node-picker-save').onclick=async()=>{
+ if(nodePickerBusy)return;
+ const selected=new Set([...document.querySelectorAll('[data-node-pick]:checked')].map(el=>nodePickerRows[Number(el.dataset.nodePick)].ip));
+ // Preserve selected nodes temporarily absent from the latest server response.
+ for(const ip of nodePickerState?.nodeDisplay?.[nodePickerGroup]||[])if(!nodePickerRows.some(n=>n.ip===ip))selected.add(ip);
+ nodePickerSetBusy(true);
+ try{const r=await chrome.runtime.sendMessage({type:'FS_SWITCH_SETTINGS',displayGroup:nodePickerGroup,displayIps:[...selected]});
+  if(!r?.ok)throw Error(r?.error||'Không lưu được lựa chọn');nodePickerDialog.close();confirmationNotice('Đã cập nhật node hiển thị.');await render();
+ }catch(e){document.querySelector('#node-picker-status').textContent=e.message;}finally{nodePickerSetBusy(false);}
+};
 document.querySelector('#groups').addEventListener('change',async event=>{
  const select=event.target.closest('[data-phone-status]');if(!select)return;
  const {fs,phone,expected}=select.dataset,status=select.value;
@@ -31,9 +74,10 @@ document.querySelector('#groups').addEventListener('change',async event=>{
  try{
   const result=await chrome.runtime.sendMessage({type:'MANUAL_FS_STATUS',fs,phone,expectedStatus:expected,status});
   if(!result?.ok)throw Error(result?.error||'Không xác minh được trạng thái.');
+  manualStatusNotes.set(fs,{text:`Đã đổi ${phone} → ${status}`,until:Date.now()+30000});
   confirmationNotice(`${fs}: đã đổi ${phone} → ${status}`);
- }catch(error){select.value=expected;confirmationNotice(error.message);}
- finally{manualStatusBusy.delete(fs);select.disabled=false;render().catch(()=>{});}
+ }catch(error){select.value=expected;manualStatusNotes.set(fs,{text:error.message,error:true,until:Date.now()+30000});confirmationNotice(error.message);}
+ finally{manualStatusBusy.delete(fs);select.disabled=false;select.blur?.();render().catch(()=>{});}
 });
 function importantAlerts(s,now=Date.now()){
  const out=(s.importantFailures||[]).filter(a=>now-a.at<86400000).map(a=>({...a}));
@@ -145,6 +189,12 @@ function patchChildren(target,source){
       target.replaceChild(next.cloneNode(true),current);continue;
     }
     if(current.nodeType===1){
+      if(current.nodeName==='SELECT'&&current.hasAttribute('data-phone-status')){
+        const sameTarget=current.getAttribute('data-fs')===next.getAttribute('data-fs')&&current.getAttribute('data-phone')===next.getAttribute('data-phone');
+        if(sameTarget&&(document.activeElement===current||manualStatusBusy.has(current.dataset.fs)))continue;
+        // A replacement phone must close the old picker before receiving new options.
+        if(!sameTarget&&document.activeElement===current)current.blur();
+      }
       for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
       for(const attr of [...next.attributes])if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
       patchChildren(current,next);
@@ -282,18 +332,18 @@ async function render(){
   let groups="";
   for(const g of ["99.153","99.155"]){
     const gr=s.grafana[g]||{}, os=s.opensips[g]||{};
-    groups+=`<div class="card"><b>${g}</b> Traffic (tham khảo): <b>${gr.value??"-"}</b> <span class="muted">(${age(gr.updatedAt)})</span>
+    groups+=`<div class="card"><div class="node-group-heading"><b>${g==='99.153'?'Collection':'Sale'} · ${g}</b><button class="secondary" data-add-node="${g}">Thêm node</button></div>Traffic (tham khảo): <b>${gr.value??"-"}</b> <span class="muted">(${age(gr.updatedAt)})</span>
     <div class="table-wrap"><table><tr><th>FS</th><th>IP</th><th>VT</th><th>State</th><th>Dãy CDR</th><th>Số lần liên tiếp</th><th>Incident / Recovery</th><th>Profile</th></tr>`;
-    for(const n of os.nodes||[]){
+    for(const n of FsSwitch.displayRows(s,g)){
       const tc=n.trend==="DOWN"?"down":n.trend==="UP"?"up":"";
-      const fs=s.fsStates?.[`${g}|${n.fs}|${n.ip}`]||{};
+      const fs=(!n.displayOnly&&!n.ambiguous?s.fsStates?.[`${g}|${n.fs}|${n.ip}`]:null)||{};
       const groupId=n.groupId??fs.groupId;
       const routed=groupId===(g==='99.153'?2:3);
       const rawState=fs.state||'INACTIVE';
       const awaitingCdr=s.config?.cdrVerificationEnabled&&rawState==='SUSPECTED'&&!fs.incident?.locked&&!fs.incident?.manualCdrProof&&!fs.pairedCdrProof&&(!fs.cdr?.locked||Date.now()-fs.cdr.checkedAt>10000);
       const shownState=awaitingCdr?'WAITING_CDR':rawState==='INACTIVE'?(groupId==null?'UNKNOWN_GROUP':routed?
         (s.schedule?.groups?.[g]?.paused?'PAUSED':s.config?.detectionSource==='CDR'?'WAITING_CDR':n.used>0?'LEARNING':'WAITING_VT'):'INACTIVE'):rawState;
-      const learningNote=s.config?.cdrRequireVtDrop&&routed&&!fs.baseline?`Đang học baseline VT: ${(fs.healthyHistory||[]).length}/${s.config.baselineSamples||20} mẫu`:s.config?.detectionSource==='CDR'?(rawState==='WAITING_CDR'?'Chờ cuộc gọi CDR mới; không xử lý dữ liệu cũ':''):awaitingCdr?(fs.cdrStatus||'Chờ CDR 5 cuộc mới nhất 480-0-0 / 480-1-0'):rawState==='INACTIVE'&&routed?(s.schedule?.groups?.[g]?.paused?'Nhóm nghỉ theo lịch':
+      const learningNote=routed&&s.schedule?.groups?.[g]?.paused?`Nhóm nghỉ theo lịch; xét lại VT/CDR từ ${esc(s.schedule.groups[g].resumeAt||s.schedule.groups[g].endAt||'13:00')}`:routed&&fs.scheduledCdrAt&&Date.now()-fs.scheduledCdrAt<=120000&&Math.max(fs.incident?.switchedAt||0,fs.lastIncident?.switchedAt||0)<fs.scheduledCdrAt&&!fs.incident?.autoExecuted&&!fs.incident?.manualExecuted?`Kiểm tra CDR mới sau 13:00 · ${fs.incident?.scheduledResume?fs.incident.cdrConfirmationReads||0:0}/2 lượt lỗi 5/5`:s.config?.cdrRequireVtDrop&&routed&&!fs.baseline?`Đang học baseline VT: ${(fs.healthyHistory||[]).length}/${s.config.baselineSamples||20} mẫu`:s.config?.detectionSource==='CDR'?(rawState==='WAITING_CDR'?'Chờ cuộc gọi CDR mới; không xử lý dữ liệu cũ':''):awaitingCdr?(fs.cdrStatus||'Chờ CDR 5 cuộc mới nhất 480-0-0 / 480-1-0'):rawState==='INACTIVE'&&routed?(s.schedule?.groups?.[g]?.paused?'Nhóm nghỉ theo lịch':
         !s.monitoringEnabled?'MONITOR đang OFF':n.used>0?
         `FS đang bật; học baseline ${fs.healthyHistory?.length||0}/${s.config.baselineSamples??20} mẫu`:'FS đang bật; chờ VT tăng'):
         rawState==='INACTIVE'&&groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
@@ -310,9 +360,9 @@ async function render(){
       const cooldownMs=g==='99.153'?(s.config.collectionCooldownMs??30000):(s.config.saleCooldownMs??30000);
       const remaining=switched?Math.max(0,Math.ceil((cooldownMs-(Date.now()-switched))/1000)):0;
       const queued=fs.state==='SUSPECTED'&&s.autoEnabled&&s.autoBlockMode==='AUTOMATIC'&&fs.autoQueueUntil>Date.now();
-      const routingNote=n.groupId===0?'FS tắt trên OpenSIPS; bỏ qua VT còn treo':fs.groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
-      const status=learningNote||routingNote||(fs.incident?.actionPending?'Đang chuyển ACTIVE → BLOCKED; chưa hoàn tất':'')||fs.actionError||(queued?`Chờ lượt AUTO · ${Math.ceil((fs.autoQueueUntil-Date.now())/1000)}s`:'')||fs.incident?.actionUncertain&&'Swap result unknown; check manually'||
-        (fs.state==='COOLDOWN'?`Locked · ${remaining}s`:fs.state==='RECOVERING'?`Locked · ${fs.recoveryNote||'Chờ CDR mới sau khi đổi số'}`:['WATCHING','WARNING','SUSPECTED'].includes(fs.state)?fs.detectionNote||'':'');
+      const routingNote=n.groupId===0?'':fs.groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
+      const status=(n.displayOnly?'Chỉ hiển thị; chưa có cấu hình xử lý cho destination này':'')||(!s.monitoringEnabled?'MONITOR đang OFF; không tự đổi số':'')||s.processingStatus?.[`${g}|${n.fs}|${n.ip}`]||learningNote||routingNote||(fs.incident?.actionPending?'Đang chuyển ACTIVE → BLOCKED; chưa hoàn tất':'')||fs.actionError||(queued?`Chờ lượt AUTO · ${Math.ceil((fs.autoQueueUntil-Date.now())/1000)}s`:'')||fs.incident?.actionUncertain&&'Swap result unknown; check manually'||
+        (fs.state==='COOLDOWN'?`Locked · ${remaining}s`:fs.state==='RECOVERING'?`Locked · ${fs.recoveryNote||'Chờ CDR mới sau khi đổi số'}`:['WATCHING','WARNING','SUSPECTED'].includes(fs.state)?fs.detectionNote||'':'')||fs.detectionNote||fs.cdrStatus||(routed?'Chờ đủ điều kiện VT và CDR để xử lý':'FS không hoạt động trong nhóm; không tự đổi số');
       const cdr=fs.cdr;
       const heldProof=s.autoBlockMode==='MANUAL'&&fs.state==='SUSPECTED'?fs.incident?.manualCdrProof:null;
       const pairedProof=fs.state==='SUSPECTED'&&Date.now()-(fs.pairedCdrProof?.checkedAt||0)<=15000?fs.pairedCdrProof:null;
@@ -325,7 +375,7 @@ async function render(){
       const backupProfile=g==='99.153'?'COLLECTION':'TELESALE';
       const cachedBackup=s.freeswitch?.backupCounts?.[n.fs];
       const backupCount=cachedBackup?.count??(s.freeswitch?.numbers? s.freeswitch.numbers.filter(row=>row.fs===n.fs&&row.profile===backupProfile&&row.status==='BACKUP').length:null);
-      groups+=`<tr><td data-label="FS">${esc(n.fs||"?")} (${backupCount??'—'})${manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
+      groups+=`<tr><td data-label="FS">${esc(n.fs||"Chưa ghép tên")} (${backupCount??'—'})${n.displayOnly?'':manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
     }
     groups+="</table></div></div>";
   }

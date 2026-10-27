@@ -1,3 +1,23 @@
+1.17.38: Đổi liên kết đăng nhập mobile được tạo từ dashboard và bot Telegram sang callcenter-coral.vercel.app, tránh mở app GitHub Pages cũ.
+
+1.17.37: Thêm nút Thêm node riêng trên bảng Collection/Sale, tải danh sách IP từ OpenSIPS và lưu lựa chọn tick hiển thị dùng chung desktop/mobile. Gộp destination cùng IP để OS01 không hiện trùng; lựa chọn hiển thị không đổi Group ID hoặc chế độ AUTO.
+
+1.17.36: Sửa dropdown ACTIVE/BACKUP/BLOCKED bị nhịp cập nhật bảng ghi đè khi đang chọn hoặc đang gửi lệnh. Đóng picker khi số đích thay đổi, đồng bộ lại sau thao tác; hiện kết quả/lỗi ngay dưới FS. Không đổi cơ chế AUTO BLOCK hoặc xác minh số trước khi ghi.
+
+1.17.35: Thêm riêng kiểm tra CDR sau nghỉ trưa 13:00 cho FS đang bật: loại CDR trước phiên, hai lượt Search liên tiếp đủ 5/5 mới xử lý theo chế độ tay/tự động mà không chờ baseline/VT tụt. Nhịp không đủ bắt đầu lại; kiểm tra đầu phiên tối đa 120s, kết thúc khi đã học baseline và CDR hợp lệ. Giữ các quy tắc 1.17.24 còn lại và lịch Collection 18:00.
+
+1.17.34: Header full màn hình dùng toàn chiều ngang, tiêu đề trên cùng, điều khiển chia cột và không ghim che bảng; preset hai nhóm nằm cạnh nhau ở màn rộng. Khi nhóm nghỉ, ghi rõ giờ xét lại thay vì báo đang học baseline. Không đổi logic VT/CDR ổn định 1.17.24 hoặc lịch hoạt động.
+
+1.17.33: Khôi phục cơ chế vận hành ổn định 1.17.24 (commit b2ecdf1), giữ cấu trúc src/config/scripts, build/deploy hiện tại và lịch Collection sau 18:00 đổi một lượt locked thành công rồi nghỉ đến 08:00. Gỡ các điều kiện bổ sung 1.17.29–1.17.32; không reset branch, dữ liệu hay cấu hình riêng.
+
+1.17.32: Sau một lượt đổi số trong nhóm, peer phải có 5 cuộc CDR lỗi đều phát sinh sau lượt đổi đó; bỏ bằng chứng ghép cũ của peer, lọc ngay khi nhận phản hồi để tránh dữ liệu đang đọc dở trước lượt đổi. Không thêm chờ nhóm 9s; nhóm khác độc lập và fresh VT + CDR vẫn xử lý ngay. Giữ xác nhận tay đã chốt, kiểm tra đầu phiên 2 lượt và dự phòng.
+
+1.17.31: Kiểm tra đầu phiên (FS vừa bật, 13:00/08:00) yêu cầu hai lượt Search CDR liên tiếp đủ 5/5 trước khi AUTO BLOCK hoặc đưa ra xác nhận tay. Không tính nhịp VT/UI là lượt mới; lượt không đủ 5/5 bắt đầu xác nhận lại. Các locked thông thường/dự phòng giữ nguyên.
+
+1.17.30: Sửa kiểm tra CDR khi FS bật lại và khi hết nghỉ (13:00/08:00): bắt đầu phiên CDR mới, loại dữ liệu trước phiên; đủ 5 lỗi mới liên tiếp thì xử lý dù VT tăng nhẹ/chưa có baseline. Kết thúc ngoại lệ đầu phiên khi đã học baseline và đọc CDR hợp lệ, hoặc sau 120s; các lượt sau vẫn VT + CDR, dự phòng giữ nguyên.
+
+1.17.29: Tạm ngưng bằng chứng CDR giữ lại ngay khi có lượt Search hợp lệ mới không đủ 5/5; xóa sau hai lượt liên tiếp. Lỗi/không có dữ liệu không tính; đủ 5/5 mới thì khôi phục ngay khi VT đạt ngưỡng. Không thêm chờ nhóm, giữ 15s tối đa và xác nhận tay đã chốt.
+
 1.17.28: Sắp xếp mã nguồn theo core/background/content/ui/mobile; gom script build/publish trong scripts, cấu hình local trong config. Giữ nguyên quy tắc vận hành 1.17.27 và đầu ra mobile-app.
 
 1.17.27: Khôi phục vận hành Collection theo 1.17.24, bỏ hoàn toàn gom nhóm/chọn BACKUP sau 17:00. Sau 18:00 tiếp tục VT + CDR, chờ một lượt đổi số locked thành công rồi ngắt Collection đến 08:00; mở lại các FS đã chạy trước khi nghỉ. Lỗi hoặc thao tác chưa rõ không tính là đổi thành công.

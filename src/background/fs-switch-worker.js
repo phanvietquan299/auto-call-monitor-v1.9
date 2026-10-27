@@ -231,7 +231,7 @@ async function toggleFsNode(msg,f,s){
   const policy=FsSwitch.groups[msg.group];
   if(!policy||!policy.fs.includes(msg.fs)||![0,policy.groupId].includes(msg.expected))throw Error('FS/Group ID không hợp lệ.');
   if(f.operation?.status==='RUNNING'||f.operation?.targetWatchPending||f.lastTest?.status==='RUNNING')throw Error('Đang có lượt thay FS; chờ hoàn tất trước khi bật/tắt.');
-  const ips={'FS01':'10.10.101.176','FS02':'10.10.101.170','FS03':'10.10.101.184','FS04':'10.10.101.180','FS05':'10.10.101.58','FS06':'10.10.101.87','FS07':'10.10.101.88'};
+  const ips={'OS01':'10.10.99.140','FS01':'10.10.101.176','FS02':'10.10.101.170','FS03':'10.10.101.184','FS04':'10.10.101.180','FS05':'10.10.101.58','FS06':'10.10.101.87','FS07':'10.10.101.88'};
   const nodes=(s.opensips?.[msg.group]?.nodes||[]).filter(n=>n.fs===msg.fs&&n.ip===ips[msg.fs]&&Number.isInteger(n.destinationId)&&n.destinationId>0);
   if(nodes.length!==1)throw Error('Chưa có destination chính xác; mở Load Balancer và chờ dữ liệu.');
   const node={fs:msg.fs,ip:ips[msg.fs],id:nodes[0].destinationId};
@@ -267,6 +267,28 @@ function reconcileSwitchLocks(f,s){
   }
 }
 async function processSwitch(msg){
+  // Display settings must not reconcile locks or change routing/automatic modes.
+  if(msg.type==='FS_SWITCH_SETTINGS'&&(msg.displayGroup||msg.refreshGroup)){
+    const group=msg.displayGroup||msg.refreshGroup;
+    if(!FsSwitch.groups[group])throw Error('Nhóm không hợp lệ');
+    const live=await getState();
+    if(msg.refreshGroup){
+      const tabs=await chrome.tabs.query({url:`http://10.10.${group}/*`});let result,error;
+      for(const tab of tabs.filter(t=>t.id!=null&&t.status!=='loading'))try{
+        const r=await chrome.tabs.sendMessage(tab.id,{type:'OPENSIPS_LIST_NODES'});
+        if(r?.ok&&r.group===group&&Array.isArray(r.catalog)){result=r;break;}error=r?.error;
+      }catch(e){error=String(e.message||e);}
+      if(!result)throw Error(error||'Mở tab OpenSIPS đã đăng nhập của nhóm và tải lại extension');
+      live.opensips[group].catalog=FsSwitch.catalogRows(result.catalog,group);
+      live.opensips[group].catalogAt=Date.now();await saveState(live);
+    }else{
+      const stored=await chrome.storage.local.get('fsSwitch'),feature=stored.fsSwitch||{};
+      const ips=FsSwitch.validateDisplayIps(live,group,msg.displayIps,feature.displayNodes?.[group]||[]);
+      feature.displayNodes={...feature.displayNodes,[group]:ips};await switchSave(feature);
+      live.nodeDisplay=feature.displayNodes;
+    }
+    return {ok:true,state:live,nodePicker:{group,catalog:live.opensips[group].catalog,nodeDisplay:live.nodeDisplay}};
+  }
   if(msg.type==='FS_SWITCH_TICK'&&typeof runCollectionEvening==='function'){const live=await getState();await runCollectionEvening(live);await saveState(live);}
   const f=await switchState();
   const initial=await switchSnapshot();

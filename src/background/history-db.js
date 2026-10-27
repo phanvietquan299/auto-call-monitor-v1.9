@@ -37,5 +37,9 @@
  async function markSynced(events){return transaction('readwrite',store=>{for(const event of events){
   const r=store.get(event.id);r.onsuccess=()=>{if(r.result&&JSON.stringify({...r.result,synced:undefined})===JSON.stringify({...event,synced:undefined}))store.put({...r.result,synced:true});};
  }});}
- globalThis.HistoryDB={append,read,remove,pending,markSynced};
+ async function pruneSynced(before){return transaction('readwrite',(store,done)=>{
+  let count=0;const r=store.index('at').openCursor(IDBKeyRange.upperBound(before,true));
+  r.onsuccess=()=>{const c=r.result;if(!c){done(count);return;}if(c.value.synced===true){c.delete();saved.delete(c.value.id);count++;}c.continue();};
+ });}
+ globalThis.HistoryDB={append,read,remove,pending,markSynced,pruneSynced};
 })();

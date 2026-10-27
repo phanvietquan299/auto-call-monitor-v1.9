@@ -61,9 +61,12 @@
   }
   async function refresh(){return request(listing,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'refresh='+encodeURIComponent('Refresh from Server')});}
   async function change(msg){
-    const allowed=group==='99.153'?['FS01','FS02','FS03','FS04']:['FS05','FS06','FS07'];
-    const ips={FS01:'10.10.101.176',FS02:'10.10.101.170',FS03:'10.10.101.184',FS04:'10.10.101.180',FS05:'10.10.101.58',FS06:'10.10.101.87',FS07:'10.10.101.88'};
+    const allowed=group==='99.153'?['FS01','FS02','FS03','FS04','OS01']:['FS05','FS06','FS07'];
+
+    const ips={OS01:'10.10.99.140',FS01:'10.10.101.176',FS02:'10.10.101.170',FS03:'10.10.101.184',FS04:'10.10.101.180',FS05:'10.10.101.58',FS06:'10.10.101.87',FS07:'10.10.101.88'};
+
     const active=group==='99.153'?2:3;
+
     if(msg.group!==group||!allowed.includes(msg.node?.fs)||ips[msg.node.fs]!==msg.node.ip||
       ![[0,active],[active,0]].some(([a,b])=>a===msg.expected&&b===msg.value))throw Error('Yêu cầu chuyển FS không hợp lệ.');
     let page=await refresh();const r=row(page,msg.node);
@@ -98,8 +101,8 @@
   chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{
     if(['FS_SWITCH_READ_TEST','FS_SWITCH_READ_NODE'].includes(msg.type)){
       if(running){reply({ok:false,error:'OpenSIPS đang chuyển FS.'});return;}
-      const ips={FS01:'10.10.101.176',FS02:'10.10.101.170',FS03:'10.10.101.184',FS04:'10.10.101.180',FS05:'10.10.101.58',FS06:'10.10.101.87',FS07:'10.10.101.88'};
-      const allowed=group==='99.153'?['FS01','FS02','FS03','FS04']:['FS05','FS06','FS07'];
+      const ips={OS01:'10.10.99.140',FS01:'10.10.101.176',FS02:'10.10.101.170',FS03:'10.10.101.184',FS04:'10.10.101.180',FS05:'10.10.101.58',FS06:'10.10.101.87',FS07:'10.10.101.88'};
+      const allowed=group==='99.153'?['FS01','FS02','FS03','FS04','OS01']:['FS05','FS06','FS07'];
       if(!allowed.includes(msg.node?.fs)||ips[msg.node.fs]!==msg.node.ip||
         msg.type==='FS_SWITCH_READ_TEST'&&(group!=='99.153'||!['FS03','FS04'].includes(msg.node.fs))){
         reply({ok:false,error:'FS không thuộc phạm vi được phép trên trang này.'});return;

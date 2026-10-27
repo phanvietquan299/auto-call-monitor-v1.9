@@ -19,7 +19,7 @@
     try{return await searchOnce(msg,false);}catch(first){cached=null;return searchOnce(msg,true);}
   }
   async function searchOnce(msg,force){
-    if(msg.group!==group||Cdr.IPS[msg.fs]!==msg.ip||(group==='99.153')!==(Number(msg.fs.slice(2))<=4))throw Error('FS/IP không thuộc máy chủ CDR này.');
+    if(msg.group!==group||Cdr.IPS[msg.fs]!==msg.ip||(group==='99.153')!==(msg.fs==='OS01'||Number(msg.fs.slice(2))<=4))throw Error('FS/IP không thuộc máy chủ CDR này.');
     const {doc,form,base,live}=await context(force);
     const action=new URL(form.getAttribute('action')||base,base);
     if(action.origin!==location.origin||!action.pathname.endsWith('/cdrviewer.php')||action.searchParams.get('action')!=='search')throw Error('Không xác định được endpoint Search CDR.');

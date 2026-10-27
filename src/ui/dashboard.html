@@ -15,11 +15,11 @@
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
 body{min-width:0}
 header{
-  position:sticky;top:0;z-index:5;background:rgba(13,23,43,.96);
+  position:static;z-index:5;background:rgba(13,23,43,.96);
   backdrop-filter:blur(10px);padding:18px clamp(12px,3vw,32px) 14px;border-bottom:1px solid #263651
 }
-.header-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-h1{min-width:0;overflow-wrap:anywhere;font-size:clamp(20px,2.5vw,34px);line-height:1.1;margin:0}
+.header-row{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:12px;max-width:1600px;margin:auto}
+h1{min-width:0;overflow-wrap:anywhere;font-size:clamp(20px,2vw,28px);line-height:1.1;margin:0}
 .toolbar{display:grid;gap:8px;min-width:0;max-width:100%}.toolbar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar-row>button:first-child{min-width:170px}
 button{border:0;border-radius:11px;padding:10px 14px;font-size:clamp(13px,1.3vw,16px);cursor:pointer;white-space:nowrap}
 button.on{background:#39d98a;color:#07130d}button.off{background:#ff667a;color:#fff}
@@ -123,7 +123,19 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
 .fs-threshold input{width:80px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font:inherit}
 .fs-threshold button{padding:8px 12px;font-size:13px}.fs-threshold span{font-size:11px}
 #fs-switch-status{margin-top:10px}
-.fs-phone-status{display:grid;gap:6px;margin-top:10px;font-size:12px;min-width:125px}.fs-phone-status span{font-variant-numeric:tabular-nums;color:#a9b9cf}.fs-phone-status select{width:100%;padding:7px 6px;border:1px solid #40546e;border-radius:8px;background:#17283e;color:#e8eef8;font-size:12px}.fs-phone-status small{color:#f8cf65}
+.fs-phone-status{display:grid;gap:6px;margin-top:10px;font-size:12px;min-width:125px}.fs-phone-status span{font-variant-numeric:tabular-nums;color:#a9b9cf}.fs-phone-status select{width:100%;padding:7px 6px;border:1px solid #40546e;border-radius:8px;background:#17283e;color:#e8eef8;font-size:12px}.fs-phone-status small{color:#f8cf65;white-space:normal;overflow-wrap:anywhere;max-width:260px}.fs-phone-status small.bad{color:var(--bad)}.fs-phone-status small.good{color:var(--good)}
+/* Keep the controls compact across the available width; scroll them with the page. */
+@media (min-width:1100px){
+ .toolbar{grid-template-columns:repeat(3,minmax(0,1fr));align-items:start}
+ .toolbar-row{min-width:0}.toolbar-row>button:first-child{min-width:0;flex:1 1 145px}
+ .toolbar-row .auto-mode-label{flex:1 1 190px;justify-content:space-between}
+ .toolbar-row select{min-width:0;max-width:100%}
+ .fs-switch-inline{grid-column:1 / -1;padding-top:10px}
+ .fs-switch-inline>div:has(>.fs-preset-row){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}
+ .fs-switch-inline>div:has(>.fs-preset-row)>b,.fs-switch-inline>div:has(>.fs-preset-row)>p{grid-column:1 / -1}
+ .fs-preset-row+.fs-preset-row{border-top:0}
+ .fs-threshold{margin-bottom:10px}
+}
 /* Short landscape viewports must not pin the entire control panel over the tables. */
 @media (orientation:landscape) and (max-height:600px){
  header{position:static;padding:10px max(12px,env(safe-area-inset-right)) 10px max(12px,env(safe-area-inset-left))}
@@ -136,6 +148,7 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
  .fs-switch-inline{grid-column:1 / -1}main{padding:12px max(12px,env(safe-area-inset-right)) 24px max(12px,env(safe-area-inset-left))}
  dialog{max-height:calc(100dvh - 20px);padding:14px}
 }
+.node-picker-item{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}.node-picker-item input{width:20px;height:20px;margin-top:3px;flex-shrink:0}.node-picker-item small{display:block;color:var(--muted);margin-top:4px}.node-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.node-group-heading button{white-space:nowrap}
 </style>
 </head>
 <body>
@@ -177,6 +190,7 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
     </div>
   </div>
 </main>
+<dialog id="node-picker-dialog" aria-labelledby="node-picker-title"><h2 id="node-picker-title">Thêm node</h2><p class="muted">Tick node để hiển thị trong bảng; bỏ tick để ẩn. Lựa chọn hiển thị không bật/tắt FS hoặc đổi số.</p><div id="node-picker-list"></div><p id="node-picker-status" role="status"></p><div class="dialog-actions"><button id="node-picker-refresh" class="secondary">Tải lại OpenSIPS</button><button id="node-picker-cancel" class="secondary">Hủy</button><button id="node-picker-save" class="on">Lưu hiển thị</button></div></dialog>
 <dialog id="block-dialog" aria-labelledby="block-title"><h2 id="block-title">Kiểm tra trước khi BLOCK</h2><div id="block-details"></div><div class="dialog-actions"><button id="block-later" class="secondary">Để sau</button><button id="block-cancel" class="secondary">Hủy</button><button id="block-confirm" class="off">Xác nhận ACTIVE → BLOCKED</button></div></dialog>
 <dialog id="auto-mode-dialog" aria-labelledby="auto-mode-title"><h2 id="auto-mode-title">Bật BLOCK tự động?</h2><p>Khi AUTO BLOCK ON, FS có VT tụt theo baseline và CDR đủ 5/5 sẽ được đổi ACTIVE → BLOCKED ngay, không hỏi xác nhận từng lần. Những sự cố đang chờ xác nhận cũng được xử lý.</p><p>Giữ lịch nghỉ, kiểm tra đúng FS/profile và khóa một thao tác mỗi sự cố. Bạn có thể chuyển về Xác nhận tay bất cứ lúc nào.</p><div class="dialog-actions"><button id="auto-mode-cancel" class="secondary">Giữ xác nhận tay</button><button id="auto-mode-confirm" class="off">Bật tự động</button></div></dialog>
 <dialog id="fs-node-dialog"><h2>Bật / tắt FS</h2><div id="fs-node-details"></div><div class="dialog-actions"><button id="fs-node-cancel" class="secondary">Hủy</button><button id="fs-node-confirm">Save + Reload on Server</button></div></dialog>

@@ -60,11 +60,27 @@ async function getState() {
   const retained=(state.events||[]).slice(0,200);
   state.events=retained;
   state.remoteSync=r.remoteSync||{};
+  state.nodeDisplay=r.fsSwitch?.displayNodes;
+  for(const group of ['99.153','99.155'])if(state.opensips[group])state.opensips[group].nodes=normalizeOpenSipsNodes(state,group,state.opensips[group].nodes);
   state.fsSwitchEnabled=!!r.fsSwitch?.enabled;
   state.rotationBarriers=Detection.rotationBarriers(r.fsSwitch);
   return state;
 }
-async function saveState(state) { if(typeof HistoryDB!=='undefined')await HistoryDB.append(state.events);await chrome.storage.local.set({state:{...state,events:(state.events||[]).slice(0,200)}}); }
+function normalizeOpenSipsNodes(state,group,rows){
+  return FsSwitch.catalogRows(rows,group).filter(n=>{
+    if(!n.ambiguous)return true;
+    const f=state.fsStates?.[`${group}|${n.fs}|${n.ip}`];
+    if(f){f.groupId=null;f.detectionNote='Nhiều destination cùng IP/Group ID; chưa xác định được node để xử lý';}
+    return false;
+  });
+}
+async function saveState(state) {
+  // Keep deduplication keys for live incidents even when they outlive retention.
+  const live=new Set(Object.values(state.fsStates||{}).flatMap(f=>[f.incident?.id,f.lastIncident?.id,f.candidateId,f.key]).filter(Boolean));
+  const cutoff=Date.now()-3*86400000;
+  for(const [key,at] of Object.entries(state.eventKeys||{}))
+    if(at<cutoff&&!live.has(key.slice(0,key.lastIndexOf('|'))))delete state.eventKeys[key];
+  if(typeof HistoryDB!=='undefined')await HistoryDB.append(state.events);await chrome.storage.local.set({state:{...state,events:(state.events||[]).slice(0,200)}}); }
 
 const keyOf=Detection.keyOf;
 function classify(state){Detection.refreshAlerts(state,Date.now());return state;}
@@ -94,8 +110,8 @@ async function waitForFreeSwitch(state,group){
 // Keep one selected phone per FS independently of the inventory page filter.
 function updateDisplayNumbers(previous,rows,now,pins={}){
   const display={...(previous||{})};
-  for(const fs of ['FS01','FS02','FS03','FS04','FS05','FS06','FS07']){
-    const profile=Number(fs.slice(2))<=4?'COLLECTION':'TELESALE';
+  for(const fs of ['FS01','FS02','FS03','FS04','OS01','FS05','FS06','FS07']){
+    const profile=(fs==='OS01'||Number(fs.slice(2))<=4)?'COLLECTION':'TELESALE';
     const scoped=rows.filter(n=>n.fs===fs&&n.profile===profile);
     const old=display[fs],pinned=pins[fs];
     const current=scoped.find(n=>n.phone===(pinned||old?.phone));
@@ -318,8 +334,8 @@ function handleMainMessage(msg,sender,sendResponse){
     }
 
     if(msg.type==='MANUAL_FS_STATUS'){
-      const fs=String(msg.fs||''),profile=Number(fs.slice(2))<=4?'COLLECTION':'TELESALE';
-      if(!/^FS0[1-7]$/.test(fs)||(!msg.refresh&&(!['ACTIVE','BACKUP','BLOCKED'].includes(msg.status)||!['ACTIVE','BACKUP','BLOCKED'].includes(msg.expectedStatus)||!msg.phone))){sendResponse({ok:false,error:'Số hoặc trạng thái không hợp lệ.'});return;}
+      const fs=String(msg.fs||''),profile=(fs==='OS01'||Number(fs.slice(2))<=4)?'COLLECTION':'TELESALE';
+      if(!/^(?:FS0[1-7]|OS01)$/.test(fs)||(!msg.refresh&&(!['ACTIVE','BACKUP','BLOCKED'].includes(msg.status)||!['ACTIVE','BACKUP','BLOCKED'].includes(msg.expectedStatus)||!msg.phone))){sendResponse({ok:false,error:'Số hoặc trạng thái không hợp lệ.'});return;}
       await waitForFreeSwitch(state);
       const tabs=await chrome.tabs.query({url:'http://10.10.101.67:5003/*'});
       if(tabs.length!==1||!tabs[0].id){sendResponse({ok:false,error:'Cần mở đúng một tab FreeSWITCH.'});return;}
@@ -495,7 +511,9 @@ function handleMainMessage(msg,sender,sendResponse){
       const group=msg.group;
       if(state.opensips[group] && msg.diagnostic?.tableFound && msg.diagnostic?.httpStatus===200){
         const old=state.opensips[group].nodes||[];
-        state.opensips[group].nodes=(msg.nodes||[]).map(n=>{
+        state.opensips[group].catalog=FsSwitch.catalogRows(msg.catalog||msg.nodes||[],group);
+        state.opensips[group].catalogAt=Date.now();
+        state.opensips[group].nodes=normalizeOpenSipsNodes(state,group,msg.nodes||[]).map(n=>{
           const prev=old.find(x=>x.ip===n.ip&&x.resource===n.resource);
           const history=[...(prev?.history||[]),n.used].slice(-120);
           return {...n,history};
@@ -516,7 +534,7 @@ function handleMainMessage(msg,sender,sendResponse){
       const previous=state.freeswitch.numbers||[];
       const backupCounts={...(state.freeswitch.backupCounts||{})};
       const at=Date.now();
-      for(const node of msg.data?.backupSummary||[])if(/^FS\d+$/.test(node.fs)&&Number.isInteger(node.backups)&&node.backups>=0)
+      for(const node of msg.data?.backupSummary||[])if(/^(?:FS\d+|OS01)$/.test(node.fs)&&Number.isInteger(node.backups)&&node.backups>=0)
         backupCounts[node.fs]={count:node.backups,updatedAt:at,source:'SUMMARY'};
       // Preserve display counts when a filtered/empty inventory arrives. This cache is not ACTIVE evidence.
       for(const row of msg.data?.numbers||[])if(row.status==='BACKUP'&&backupCounts[row.fs]?.source!=='SUMMARY')
@@ -539,7 +557,7 @@ function handleMainMessage(msg,sender,sendResponse){
       const code=crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'');
       const response=await fetch(config.url+'/rest/v1/rpc/call_monitor_mobile_link',{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:config.historyToken,p_code:code}),signal:AbortSignal.timeout(10000)});
       if(!response.ok){sendResponse({ok:false,error:'Không tạo được liên kết đăng nhập app'});return;}
-      sendResponse({ok:true,url:'https://phanvietquan299.github.io/auto-call-monitor-v1.9/#code='+code});return;
+      sendResponse({ok:true,url:'https://callcenter-coral.vercel.app/#code='+code});return;
     }
     if(msg.type==='DISMISS_CDR_WARNING'){
       state.cdrWarnings=(state.cdrWarnings||[]).filter(w=>w.fs!==msg.fs);await saveState(state);sendResponse({ok:true});return;

@@ -98,7 +98,7 @@ async function command(text:string,dedupe:string,messageId?:number){
  if(name==='app'||name==='start'&&args[0]==='app'){
   const code=crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'');
   await rpc('call_monitor_mobile_link',{p_code:code});
-  await send('📱 APP AUTO CALL MONITOR\nGiao diện như tool trên máy. Liên kết đăng nhập dùng một lần, hết hạn sau 5 phút.',[[{text:'📱 Mở app',url:'https://phanvietquan299.github.io/auto-call-monitor-v1.9/#code='+code}]]);return;
+  await send('📱 APP AUTO CALL MONITOR\nGiao diện như tool trên máy. Liên kết đăng nhập dùng một lần, hết hạn sau 5 phút.',[[{text:'📱 Mở app',url:'https://callcenter-coral.vercel.app/#code='+code}]]);return;
  }
  if(['start','menu','help','status','pending','cdr','warnings'].includes(name)){await view(['start','menu'].includes(name)?'status':name,messageId);return;}
  const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);

@@ -1,0 +1,8 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const source=fs.readFileSync('src/background/background.js','utf8');
+const code=source.slice(source.indexOf('async function readManualFreeSwitch('),source.indexOf('let statusWriteInProgress=false;'));
+function setup(initial,next){let reloads=0,time=0;const sent=[];const ctx={Date:{now:()=>time},setTimeout:fn=>{time+=500;fn();},chrome:{tabs:{reload:async()=>{reloads++;},sendMessage:async(id,msg)=>{sent.push(msg);return reloads?next:initial;}}}};vm.createContext(ctx);vm.runInContext(code,ctx);return {read:()=>ctx.readManualFreeSwitch(1,'FS01','COLLECTION','123','ACTIVE'),sent,get reloads(){return reloads;}};}
+const sample=enabled=>({ok:true,numbers:[{fs:'FS01',profile:'COLLECTION',phone:'123',status:'ACTIVE',hasStatusControl:enabled}]});
+test('Manual status uses ready page without reload',async()=>{const p=setup(sample(true),null);assert.equal((await p.read()).ok,true);assert.equal(p.reloads,0);});
+test('Manual status refreshes disabled or disconnected page before validating exact phone',async()=>{for(const initial of [sample(false),null]){const p=setup(initial,sample(true));assert.equal((await p.read()).numbers[0].hasStatusControl,true);assert.equal(p.reloads,1);assert.ok(p.sent.every(m=>m.type==='READ_FS_NUMBERS'));}});
+test('Manual status never dispatches a write or retries reload when refresh does not restore target',async()=>{const p=setup(sample(false),{ok:true,numbers:[]});assert.equal((await p.read()).numbers.length,0);assert.equal(p.reloads,1);assert.ok(p.sent.every(m=>m.type==='READ_FS_NUMBERS'));});

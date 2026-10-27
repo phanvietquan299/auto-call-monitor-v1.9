@@ -1,6 +1,6 @@
 /* Collection uses the 1.17.24 policy, with one final confirmed locked change after 18:00. */
 (function(root){
- const members=['FS01','FS02','FS03','FS04'];
+ const members=['FS01','FS02','FS03','FS04','OS01'];
  function phase(now){
   const local=new Date(now+25200000),minute=local.getUTCHours()*60+local.getUTCMinutes();
   return {date:local.toISOString().slice(0,10),minute,previousDate:new Date(local.getTime()-86400000).toISOString().slice(0,10)};
@@ -20,7 +20,7 @@
   const saved=state.collectionEvening,time=phase(now),data=state.opensips?.['99.153'];
   if(!saved||!data||now-data.updatedAt<0||now-data.updatedAt>45000)return null;
   const nodes=(data.nodes||[]).filter(n=>members.includes(n.fs)&&n.resource==='vt');
-  if(nodes.length!==4||new Set(nodes.map(n=>n.fs)).size!==4||nodes.some(n=>![0,2].includes(n.groupId)||!Number.isInteger(n.destinationId)||n.destinationId<=0))return null;
+  if(nodes.length!==members.length||new Set(nodes.map(n=>n.fs)).size!==members.length||nodes.some(n=>![0,2].includes(n.groupId)||!Number.isInteger(n.destinationId)||n.destinationId<=0))return null;
   const active=nodes.filter(n=>n.groupId===2).map(n=>({...n,id:n.destinationId}));
   if(saved.policy===27&&saved.status==='FINAL_CONFIRMED')return {kind:'NIGHT',date:saved.date,enable:[],disable:active,resumeNodes:saved.resumeNodes||active};
   if(saved.status==='NIGHT'&&saved.date===time.previousDate&&time.minute>=480&&time.minute<1080){

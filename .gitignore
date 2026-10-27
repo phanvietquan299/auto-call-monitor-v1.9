@@ -1,6 +1,6 @@
 /notes_ip.md
 /task.md
-/tests/
+/tests/*
 
 *.test.js
 
@@ -26,3 +26,9 @@
 /playwright-report/
 __pycache__/
 *.pyc
+
+!/tests/low-vt-fallback.test.js
+!/tests/storage-retention.test.js
+!/tests/os01.test.js
+!/tests/node-picker.test.js
+!/tests/node-picker-browser.test.js

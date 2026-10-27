@@ -35,10 +35,11 @@
   if(message.type==='GET_STATE'){const data=cached||await state();state().catch(()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
   if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
   if(message.type==='HISTORY_READ'){
+   for(const [key,value] of historyCache)if(Date.now()-value.at>=5000)historyCache.delete(key);
    const previous=historyCache.get(message.date||'');if(previous&&Date.now()-previous.at<5000)return previous.result;
    const start=message.date?Date.parse(message.date+'T00:00:00+07:00'):null,events=[];
    for(let offset=0;;offset+=500){const rows=await rpc('history',{start,end:start==null?null:start+86400000,offset});events.push(...rows);if(rows.length<500)break;}
-   const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.set(message.date||'',{at:Date.now(),result});return result;
+   const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.clear();if(events.length<=1000)historyCache.set(message.date||'',{at:Date.now(),result});return result;
   }
   if(commandPending)return {ok:false,error:'Đang xử lý lệnh trước, vui lòng chờ kết quả.'};
   commandPending=true;commandNotice('Đang gửi yêu cầu tới máy tính…');
@@ -54,6 +55,11 @@
      historyCache.clear();lastRead=0;
      const r=result.result||{ok:false,error:'Chưa có kết quả'};
      commandPending=false;commandNotice(r.ok?'Đã thực hiện · đang cập nhật dữ liệu':r.error||'Thao tác không thành công');
+     if(r.nodePicker&&cached?.snapshot?.dashboard){
+      const dashboard=cached.snapshot.dashboard,picker=r.nodePicker;
+      dashboard.nodeDisplay=picker.nodeDisplay;
+      if(dashboard.opensips?.[picker.group])dashboard.opensips[picker.group].catalog=picker.catalog;
+     }
      state().catch(()=>{});
      return {...r,state:cached?.snapshot?.dashboard};
     }
