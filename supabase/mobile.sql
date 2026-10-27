@@ -5,6 +5,7 @@ revoke all on call_monitor_private.mobile_access from public,anon,authenticated;
 create table if not exists call_monitor_private.mobile_password(id boolean primary key default true check(id),password_hash text not null,failures integer not null default 0,locked_until bigint not null default 0);
 alter table call_monitor_private.mobile_password enable row level security;
 revoke all on call_monitor_private.mobile_password from public,anon,authenticated;
+-- Tác dụng: Tạo mã đăng nhập mobile một lần, có thời hạn và dọn phiên hết hạn.
 create or replace function public.call_monitor_mobile_link(p_token text,p_code text) returns jsonb language plpgsql security definer set search_path='' as $$
 begin
  if p_token is null or not exists(select 1 from call_monitor_private.credentials where token_hash=encode(sha256(convert_to(p_token,'UTF8')),'hex')) then raise exception 'Access denied' using errcode='42501';end if;
@@ -12,6 +13,7 @@ begin
  insert into call_monitor_private.mobile_access(code_hash,code_expires) values(encode(sha256(convert_to(p_code,'UTF8')),'hex'),(extract(epoch from clock_timestamp())*1000)::bigint+300000);
  return '{}'::jsonb;
 end $$;
+-- Tác dụng: Xác thực phiên/mật khẩu mobile; phục vụ snapshot, lịch sử và hàng đợi lệnh được cho phép.
 create or replace function public.call_monitor_mobile(p_token text,p_action text,p_payload jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
 declare t bigint=(extract(epoch from clock_timestamp())*1000)::bigint; session text; n integer; runtime call_monitor_private.remote_runtime; command call_monitor_private.remote_commands; result jsonb; start_ms bigint; end_ms bigint; auth call_monitor_private.mobile_password; password text;
 begin

@@ -1,4 +1,4 @@
-(() => {
+(/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ () => {
   const GROUP = location.hostname === "10.10.99.153" ? "99.153" :
                 location.hostname === "10.10.99.155" ? "99.155" : null;
   if (!GROUP) return;
@@ -23,12 +23,14 @@
   let busy = false;
   let monitoringEnabled = true;
 
+  /** Tác dụng: Gửi mẫu OpenSIPS hoặc chẩn đoán lỗi về background, bỏ qua runtime đã bị reload. */
   function send(msg) {
     try {
-      if (chrome?.runtime?.id) chrome.runtime.sendMessage(msg).catch(()=>{});
+      if (chrome?.runtime?.id) chrome.runtime.sendMessage(msg).catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});
     } catch (_) {}
   }
 
+  /** Tác dụng: Phân tích HTML Load Balancer thành catalog IP/destination và các node VT được giám sát. */
   function parse(html) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const table = doc.querySelector("table.ttable");
@@ -36,7 +38,7 @@
 
     const nodes=[],catalog=[];
     for (const row of [...table.rows]) {
-      const text=(row.cells?[...row.cells].map(c=>c.textContent||'').join(' '):(row.textContent||"" )).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
+      const text=(row.cells?[...row.cells].map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong parse. */ c=>c.textContent||'').join(' '):(row.textContent||"" )).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
       const im=text.match(/sip:((?:\d{1,3}\.){3}\d{1,3})(?::\d+)?/i);
       const vm=text.match(/\bvt\s*=\s*(\d+)\s*\/\s*(\d+)/i);
       if (!im) continue;
@@ -68,6 +70,7 @@
     return {nodes,catalog, tableFound:true, rows:table.rows.length};
   }
 
+  /** Tác dụng: Lấy mẫu định kỳ khi không bận, gửi kết quả hoặc chẩn đoán lỗi về bộ điều phối. */
   async function poll(){
     if(busy||globalThis.fsSwitchBusy||globalThis.OpenSipsPage&&OpenSipsPage.role()==='CDR') return;
     busy=true;
@@ -110,21 +113,21 @@
     }finally{busy=false;}
   }
 
-  chrome.storage.local.get("state").then(r => {
+  chrome.storage.local.get("state").then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất. */ r => {
     monitoringEnabled = r.state?.monitoringEnabled !== false;
     poll();
-  }).catch(()=>{ poll(); });
+  }).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ. */ ()=>{ poll(); });
 
-  chrome.runtime.onMessage.addListener((msg,_sender,reply) => {
+  chrome.runtime.onMessage.addListener(/** Tác dụng: Nhận message extension, phân biệt loại lệnh và trả kết quả đồng bộ hoặc bất đồng bộ. */ (msg,_sender,reply) => {
     if(msg.type==='OPENSIPS_LIST_NODES'){
       if(globalThis.fsSwitchBusy){reply({ok:false,error:'Đang chuyển FS; thử tải lại sau'});return;}
       fetch(ENDPOINT,{method:'POST',credentials:'include',cache:'no-store',signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'refresh='+encodeURIComponent('Refresh from Server')})
-        .then(async res=>{if(!res.ok)throw Error('OpenSIPS HTTP '+res.status);const parsed=parse(await res.text());if(!parsed.tableFound)throw Error('Không đọc được bảng Load Balancer; kiểm tra đăng nhập');return {ok:true,group:GROUP,catalog:parsed.catalog};})
-        .then(reply).catch(error=>reply({ok:false,error:String(error.message||error)}));return true;
+        .then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất. */ async res=>{if(!res.ok)throw Error('OpenSIPS HTTP '+res.status);const parsed=parse(await res.text());if(!parsed.tableFound)throw Error('Không đọc được bảng Load Balancer; kiểm tra đăng nhập');return {ok:true,group:GROUP,catalog:parsed.catalog};})
+        .then(reply).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ. */ error=>reply({ok:false,error:String(error.message||error)}));return true;
     }
 
     if(msg.type==="OPENSIPS_POLL_NOW"){
-      poll().then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:String(e)}));return true;
+      poll().then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất. */ ()=>reply({ok:true})).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ. */ e=>reply({ok:false,error:String(e)}));return true;
     }
     if (msg.type === "MONITORING_CHANGED") {
       monitoringEnabled = !!msg.enabled;
@@ -133,5 +136,5 @@
   });
 
   const timer=setInterval(poll,1000);
-  addEventListener("beforeunload",()=>{clearInterval(timer);},{once:true});
+  addEventListener("beforeunload",/** Tác dụng: Dừng timer lấy mẫu khi tab đang rời trang. */ ()=>{clearInterval(timer);},{once:true});
 })();

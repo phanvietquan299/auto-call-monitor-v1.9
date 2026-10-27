@@ -1,5 +1,5 @@
 /* Reuse the desktop dashboard through a remote transport; no admin credential. */
-(()=>{
+(/** Tác dụng: Giữ hộp thoại mở khi đang có thao tác ghi; nếu rảnh thì xóa lựa chọn tạm. */ ()=>{
  const project='https://ygxifobrqndflyeupxhj.supabase.co';
  const config=globalThis.MobileConfig;
  const historyCache=new Map();
@@ -8,32 +8,36 @@
  notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
  notice.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;max-width:90vw;padding:12px 18px;border-radius:12px;background:#243850;color:#fff;box-shadow:0 4px 20px #0006;font-size:14px;pointer-events:none';
  notice.hidden=true;document.body.appendChild(notice);
- function commandNotice(text){clearTimeout(noticeTimer);notice.textContent=text;notice.hidden=false;if(!commandPending)noticeTimer=setTimeout(()=>{notice.hidden=true;},5000);}
+ /** Tác dụng: Hiện thông báo trạng thái lệnh mobile và tự ẩn khi không còn thao tác chờ. */
+ function commandNotice(text){clearTimeout(noticeTimer);notice.textContent=text;notice.hidden=false;if(!commandPending)noticeTimer=setTimeout(/** Tác dụng: Chạy bước tiếp theo sau thời gian chờ trong commandNotice. */ ()=>{notice.hidden=true;},5000);}
 
  let session=localStorage.getItem('monitor-session')||'',cached,pending,lastRead=0;
- const pause=ms=>new Promise(r=>setTimeout(r,ms));
+ const pause=/** Tác dụng: Tạo Promise chờ một khoảng thời gian trước khi thử đọc kết quả tiếp. */ ms=>new Promise(/** Tác dụng: Nối callback của API bất đồng bộ vào Promise và trả kết quả hoặc lỗi trong pause. */ r=>setTimeout(r,ms));
  const login=document.getElementById('mobile-login');
  const badge=document.getElementById('mobile-connection');
+ /** Tác dụng: Gọi RPC mobile Supabase; xóa phiên và mở đăng nhập lại khi server từ chối xác thực. */
  async function rpc(action,payload={},access=session){
   const r=await fetch(project+'/rest/v1/rpc/call_monitor_mobile?apikey='+encodeURIComponent(config.anonKey),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:access,p_action:action,p_payload:payload}),signal:AbortSignal.timeout(30000)});
   const data=await r.json();if(!r.ok){if(r.status===401||r.status===403){session='';localStorage.removeItem('monitor-session');login.hidden=false;}throw Error(data.message||'Không kết nối được máy');}return data;
  }
+ /** Tác dụng: Đọc snapshot mobile với cache ngắn, gộp yêu cầu trùng và hiển thị độ trễ/online. */
  async function state(){
   if(!session){login.hidden=false;return null;}
   if(cached&&Date.now()-lastRead<900)return cached;
   if(pending)return pending;
-  pending=rpc('state').then(data=>{cached=data;lastRead=Date.now();const lag=data.at?Math.max(0,Math.round((Date.now()-(data.snapshot?.capturedAt||data.at))/1000)):null;badge.textContent=data.online?`● Máy online · dữ liệu ${lag}s trước`:'● Máy offline · đang xem dữ liệu cũ';badge.className=data.online?'good':'bad';return data;}).catch(error=>{badge.textContent='Mất mạng · dữ liệu có thể đã cũ';badge.className='bad';if(cached)cached={...cached,online:false};return cached||null;}).finally(()=>{pending=null;});return pending;
+  pending=rpc('state').then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong state. */ data=>{cached=data;lastRead=Date.now();const lag=data.at?Math.max(0,Math.round((Date.now()-(data.snapshot?.capturedAt||data.at))/1000)):null;badge.textContent=data.online?`● Máy online · dữ liệu ${lag}s trước`:'● Máy offline · đang xem dữ liệu cũ';badge.className=data.online?'good':'bad';return data;}).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ trong state. */ error=>{badge.textContent='Mất mạng · dữ liệu có thể đã cũ';badge.className='bad';if(cached)cached={...cached,online:false};return cached||null;}).finally(/** Tác dụng: Dọn cờ hoặc trạng thái sau bước bất đồng bộ, kể cả khi lỗi trong state. */ ()=>{pending=null;});return pending;
  }
- const initial=(async()=>{
+ const initial=(/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ async()=>{
   const code=new URLSearchParams(location.hash.slice(1)).get('code');
   if(code){history.replaceState(null,'',location.pathname);try{const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}}
   if(session)login.hidden=true;
  })();
+ /** Tác dụng: Chuyển message giao diện sang đọc snapshot hoặc gửi lệnh remote rồi chờ kết quả. */
  async function sendMessage(message){
   await initial;
   if(message.type==='SET_MOBILE_PASSWORD')return rpc('set_password',{password:message.password});
-  if(message.type==='GET_STATE'){const data=cached||await state();state().catch(()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
-  if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
+  if(message.type==='GET_STATE'){const data=cached||await state();state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong sendMessage. */ ()=>{});return {ok:true,state:data?.snapshot?.dashboard||null};}
+  if(message.type==='FS_SWITCH_STATE'){const data=cached||await state();state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong sendMessage. */ ()=>{});const s=data?.snapshot;if(!s)throw Error('Chưa có dữ liệu máy');return {ok:true,feature:s.feature,candidates:s.candidates||[],nodes:s.dashboard?.opensips,threshold:s.feature.backupThreshold??10};}
   if(message.type==='HISTORY_READ'){
    for(const [key,value] of historyCache)if(Date.now()-value.at>=5000)historyCache.delete(key);
    const previous=historyCache.get(message.date||'');if(previous&&Date.now()-previous.at<5000)return previous.result;
@@ -60,7 +64,7 @@
       dashboard.nodeDisplay=picker.nodeDisplay;
       if(dashboard.opensips?.[picker.group])dashboard.opensips[picker.group].catalog=picker.catalog;
      }
-     state().catch(()=>{});
+     state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong sendMessage. */ ()=>{});
      return {...r,state:cached?.snapshot?.dashboard};
     }
     if(result.status==='RUNNING')commandNotice('Máy tính đang thực hiện thao tác…');
@@ -77,31 +81,32 @@
 
  }
  globalThis.chrome={runtime:{sendMessage}};
+ /** Tác dụng: Đọc snapshot định kỳ khi app đang hiển thị và đã có phiên đăng nhập. */
  async function poll(){await initial;if(document.visibilityState!=='hidden'&&session)await state();setTimeout(poll,1000);}
- document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){lastRead=0;state().catch(()=>{});}});
- window.addEventListener('online',()=>{lastRead=0;state().catch(()=>{});});
+ document.addEventListener('visibilitychange',/** Tác dụng: Lấy snapshot mới khi người dùng quay lại app mobile. */ ()=>{if(document.visibilityState!=='hidden'){lastRead=0;state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});}});
+ window.addEventListener('online',/** Tác dụng: Lấy lại snapshot khi trình duyệt báo kết nối mạng đã phục hồi. */ ()=>{lastRead=0;state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});});
  poll();
  const passwordForm=document.getElementById('mobile-password-login-form');
- if(passwordForm)passwordForm.onsubmit=async event=>{
+ if(passwordForm)passwordForm.onsubmit=/** Tác dụng: Đăng nhập mobile bằng mật khẩu và lưu phiên được RPC cấp. */ async event=>{
   event.preventDefault();const input=document.getElementById('mobile-login-password'),error=document.getElementById('mobile-password-login-error'),button=document.getElementById('mobile-password-login-submit');
   button.disabled=true;error.textContent='Đang đăng nhập…';
   try{
    const auth=await rpc('password_login',{password:input.value},'');
    if(!auth.ok||!auth.session)throw Error(auth.error||'Không đăng nhập được.');
-   session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;lastRead=0;login.hidden=true;error.textContent='';state().catch(()=>{});
+   session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;lastRead=0;login.hidden=true;error.textContent='';state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});
   }catch(e){error.textContent=e.message;}finally{button.disabled=false;}
  };
- document.getElementById('mobile-login-form').onsubmit=async event=>{event.preventDefault();const input=document.getElementById('mobile-login-link');let code=input.value.trim();try{if(code.startsWith('https://'))code=new URLSearchParams(new URL(code).hash.slice(1)).get('code')||'';if(!/^[a-f0-9]{64}$/.test(code))throw Error('Dán đúng liên kết đăng nhập do bot gửi');const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}};
- document.getElementById('mobile-logout').onclick=()=>{session='';localStorage.removeItem('monitor-session');cached=null;login.hidden=false;};
+ document.getElementById('mobile-login-form').onsubmit=/** Tác dụng: Đổi liên kết đăng nhập một lần lấy phiên mobile và lưu phiên ở máy hiện tại. */ async event=>{event.preventDefault();const input=document.getElementById('mobile-login-link');let code=input.value.trim();try{if(code.startsWith('https://'))code=new URLSearchParams(new URL(code).hash.slice(1)).get('code')||'';if(!/^[a-f0-9]{64}$/.test(code))throw Error('Dán đúng liên kết đăng nhập do bot gửi');const auth=await rpc('exchange',{},code);session=auth.session;localStorage.setItem('monitor-session',session);input.value='';cached=null;login.hidden=true;}catch(error){document.getElementById('mobile-login-error').textContent=error.message;}};
+ document.getElementById('mobile-logout').onclick=/** Tác dụng: Xóa phiên đăng nhập mobile ở máy hiện tại và mở màn hình đăng nhập. */ ()=>{session='';localStorage.removeItem('monitor-session');cached=null;login.hidden=false;};
  const updateButton=document.getElementById('mobile-update');
- if(updateButton)updateButton.onclick=async()=>{
+ if(updateButton)updateButton.onclick=/** Tác dụng: Xóa cache app cũ, cập nhật service worker và tải lại URL có mã làm mới. */ async()=>{
   if(commandPending){commandNotice('Chờ thao tác hoàn tất rồi cập nhật app.');return;}
   updateButton.disabled=true;updateButton.textContent='Đang cập nhật…';
   try{
-   if('caches'in globalThis){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith('monitor-mobile-')).map(key=>caches.delete(key)));}
+   if('caches'in globalThis){const keys=await caches.keys();await Promise.all(keys.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra. */ key=>key.startsWith('monitor-mobile-')).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng. */ key=>caches.delete(key)));}
    if('serviceWorker'in navigator){const registration=await navigator.serviceWorker.getRegistration();if(registration)await registration.update();}
    const url=new URL(location.href);url.searchParams.set('refresh',Date.now());location.replace(url.href);
   }catch(error){updateButton.disabled=false;updateButton.textContent='Cập nhật app';commandNotice(error.message);}
  };
- if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(reg=>reg.update()).catch(()=>{});
+ if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất. */ reg=>reg.update()).catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});
 })();

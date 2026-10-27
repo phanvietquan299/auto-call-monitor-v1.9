@@ -1,3 +1,7 @@
+1.17.40: Node được tick là phạm vi monitor/can thiệp của bản extension: bỏ tick dừng lấy CDR, chặn BLOCK và bật/tắt/thay FS kể cả lệnh cũ hoặc remote. Hủy yêu cầu chưa gửi, giữ khóa/kết quả thao tác đã gửi; tick lại học dữ liệu mới. Lịch Collection chỉ xử lý node được chọn, không Reload toàn nhóm khi có node ngoài phạm vi.
+
+1.17.39: Riêng OS01 Collection (10.10.99.140), hai lượt Search liên tiếp đều xác nhận CDR lỗi 5/5 cho phép xử lý dù VT không tụt. Ngắt chuỗi khi CDR lỗi đọc/hết lỗi/cũ hoặc số ACTIVE đổi; giữ lịch nghỉ, chế độ tay/tự động và khóa chống gửi lặp.
+
 1.17.38: Đổi liên kết đăng nhập mobile được tạo từ dashboard và bot Telegram sang callcenter-coral.vercel.app, tránh mở app GitHub Pages cũ.
 
 1.17.37: Thêm nút Thêm node riêng trên bảng Collection/Sale, tải danh sách IP từ OpenSIPS và lưu lựa chọn tick hiển thị dùng chung desktop/mobile. Gộp destination cùng IP để OS01 không hiện trùng; lựa chọn hiển thị không đổi Group ID hoặc chế độ AUTO.

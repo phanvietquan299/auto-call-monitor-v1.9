@@ -11,6 +11,7 @@ errors = []
 checks = 0
 
 
+# Tác dụng: Đếm một phép kiểm tra và gom lỗi để báo cáo tổng hợp cuối lượt.
 def check(condition, message):
     global checks
     checks += 1
@@ -18,6 +19,7 @@ def check(condition, message):
         errors.append(message)
 
 
+# Tác dụng: Kiểm tra liên kết asset tương đối tồn tại trong project; bỏ qua URL bên ngoài.
 def local_file(base, reference):
     parsed = urlsplit(reference)
     if parsed.scheme or parsed.netloc or not parsed.path:

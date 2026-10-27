@@ -41,6 +41,7 @@ if not key:
     raise SystemExit('Cannot identify access token in vercel_key.md')
 team = args.team_id or (team_match.group() if team_match else None)
 query = '?' + urllib.parse.urlencode({'teamId': team}) if team else '' 
+# Tác dụng: Gọi Vercel API với token local, giới hạn timeout và che token nếu API trả lỗi.
 def request(path, payload=None):
     req = urllib.request.Request('https://api.vercel.com' + path + query,
         data=json.dumps(payload).encode() if payload is not None else None,

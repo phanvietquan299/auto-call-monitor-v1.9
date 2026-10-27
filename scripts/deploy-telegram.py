@@ -8,6 +8,7 @@ bot=re.search(r'\b\d{6,12}:[A-Za-z0-9_-]{25,}\b',s).group()
 chat=re.search(r'(?im)^\s*id\s*:\s*(-?\d+)',s).group(1)
 config=json.loads((root/'config/supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
 ref=config['url'].split('//')[1].split('.')[0]
+# Tác dụng: Gửi HTTP cho bước deploy và che các secret đã biết trong thông báo lỗi.
 def req(url,data=None,headers=None):
  try:
   with urllib.request.urlopen(urllib.request.Request(url,data=data,headers=headers or {}),timeout=60) as r:
@@ -16,6 +17,7 @@ def req(url,data=None,headers=None):
   message=error.read().decode();
   for value in [pat,bot,config['historyToken']]:message=message.replace(value,'[REDACTED]')
   raise RuntimeError('HTTP '+str(error.code)+': '+message) from None
+# Tác dụng: Gọi Supabase Management API trong đúng project với payload quản trị được truyền vào.
 def management(path,payload):
  return req('https://api.supabase.com/v1/projects/'+ref+'/'+path,json.dumps(payload).encode(),{'Authorization':'Bearer '+pat,'Content-Type':'application/json'})
 me=req('https://api.telegram.org/bot'+bot+'/getMe');print('Bot verified:',me['result']['username'])

@@ -6,6 +6,7 @@ p=subprocess.run(['git','credential','fill'],input='protocol=https\nhost=github.
 credential=dict(line.split('=',1) for line in p.stdout.splitlines() if '=' in line)
 headers={'Authorization':'Bearer '+credential['password'],'Accept':'application/vnd.github+json','Content-Type':'application/json'}
 base='https://api.github.com/repos/phanvietquan299/auto-call-monitor-v1.9'
+# Tác dụng: Gọi GitHub API để xuất bản các asset mobile đã lọc; không in credential ra log.
 def request(path,data=None,method=None):
  with urllib.request.urlopen(urllib.request.Request(base+path,data=json.dumps(data).encode() if data is not None else None,headers=headers,method=method),timeout=30) as response:
   raw=response.read();return json.loads(raw) if raw else {}

@@ -1,4 +1,5 @@
 /* Called only inside the shared worker queue. Does not change FreeSWITCH numbers. */
+/** Tác dụng: Điều phối lượt đổi cuối buổi Collection, tắt node ban đêm và khôi phục node buổi sáng. */
 async function runCollectionEvening(state){
  if(typeof CollectionEvening==='undefined'||!state.monitoringEnabled)return;
  if(state.collectionEvening?.status==='RUNNING'){
@@ -18,14 +19,14 @@ async function runCollectionEvening(state){
  if(['RUNNING','FAILED'].includes(rotation.fsSwitch?.operation?.status)||rotation.fsSwitch?.lastTest?.status==='RUNNING')return;
  const job=CollectionEvening.next(state,Date.now());if(!job)return;
  let tab;
- await CollectionEvening.execute(state,job,{now:()=>Date.now(),save:saveState,setGroup:async(node,expected,value)=>{
+ await CollectionEvening.execute(state,job,{now:/** Tác dụng: Cung cấp đồng hồ hiện tại cho bộ thực thi lịch Collection. */ ()=>Date.now(),save:saveState,setGroup:/** Tác dụng: Bật/tắt Group ID cho node và xác minh lại qua luồng Save/Reload. */ async(node,expected,value)=>{
   if(tab==null)tab=await switchTab('http://10.10.99.153/*');
   const before=await switchCommand(tab,{type:'FS_SWITCH_READ_NODE',node});
   if(before.groupId===value)return; // A persisted step may already be applied.
   if(before.groupId!==expected)throw Error('Group ID đã thay đổi ở '+node.fs+'; dừng lịch Collection.');
   const result=await switchCommand(tab,{type:'FS_SWITCH_SET_GROUP',node,expected,value,group:'99.153'});
   await refreshSwitchPage(tab,node,value,result.pageId);
-  const n=state.opensips['99.153'].nodes.find(n=>n.fs===node.fs&&n.ip===node.ip&&n.destinationId===node.id);
+  const n=state.opensips['99.153'].nodes.find(/** Tác dụng: Tìm phần tử đầu tiên khớp điều kiện trong runCollectionEvening. */ n=>n.fs===node.fs&&n.ip===node.ip&&n.destinationId===node.id);
   if(!n)throw Error('Không còn destination '+node.fs);
   n.groupId=value;state.opensips['99.153'].updatedAt=Date.now();
   Detection.sample(state,'99.153',[n],Date.now());

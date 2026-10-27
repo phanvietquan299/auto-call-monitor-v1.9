@@ -1,11 +1,12 @@
 /* Read-only Search requests; never changes Load Balancer or FreeSWITCH. */
-(()=>{
+(/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ ()=>{
   const group=location.hostname==='10.10.99.153'?'99.153':location.hostname==='10.10.99.155'?'99.155':null;
   if(!group)return;let busy=false,cached=null;
   const endpoint=location.origin+'/cp/tools/system/cdrviewer/cdrviewer.php';
+  /** Tác dụng: Tìm form CDR đang mở hoặc tải form mới; tái sử dụng cache form trong thời hạn cho phép. */
   async function context(force){
     if(!force){
-      const doc=OpenSipsPage.documents().find(d=>OpenSipsPage.cdrForm(d));
+      const doc=OpenSipsPage.documents().find(/** Tác dụng: Tìm phần tử đầu tiên khớp điều kiện trong context. */ d=>OpenSipsPage.cdrForm(d));
       if(doc)return {doc,form:OpenSipsPage.cdrForm(doc),base:doc.baseURI||doc.URL,live:true};
       if(cached&&Date.now()-cached.at<60000)return cached;
     }
@@ -15,9 +16,11 @@
     if(!form)throw Error('Trang CDR không có form Search; cần đăng nhập lại OpenSIPS.');
     cached={doc,form,base:response.url||endpoint,live:false,at:Date.now()};return cached;
   }
+  /** Tác dụng: Search CDR và thử lại một lần với form tải mới nếu lượt đầu thất bại. */
   async function search(msg){
     try{return await searchOnce(msg,false);}catch(first){cached=null;return searchOnce(msg,true);}
   }
+  /** Tác dụng: Xác thực FS/IP, POST form Search đúng ngày Việt Nam rồi phân tích và cập nhật bảng CDR. */
   async function searchOnce(msg,force){
     if(msg.group!==group||Cdr.IPS[msg.fs]!==msg.ip||(group==='99.153')!==(msg.fs==='OS01'||Number(msg.fs.slice(2))<=4))throw Error('FS/IP không thuộc máy chủ CDR này.');
     const {doc,form,base,live}=await context(force);
@@ -47,9 +50,9 @@
     }
     return {ok:true,group,ip:msg.ip,records,queriedAt:Date.now()};
   }
-  chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{
+  chrome.runtime.onMessage.addListener(/** Tác dụng: Nhận message extension, phân biệt loại lệnh và trả kết quả đồng bộ hoặc bất đồng bộ. */ (msg,_sender,reply)=>{
     if(msg.type!=='CDR_CHECK_FS')return;
     if(busy){reply({ok:false,error:'CDR Search đang chạy; chờ truy vấn trước.'});return;}
-    busy=true;globalThis.cdrReadBusy=true;search(msg).then(reply).catch(e=>reply({ok:false,error:String(e.message||e)})).finally(()=>{busy=false;globalThis.cdrReadBusy=false;OpenSipsPage.flushRefresh?.();});return true;
+    busy=true;globalThis.cdrReadBusy=true;search(msg).then(reply).catch(/** Tác dụng: Xử lý lỗi của bước bất đồng bộ theo chính sách tại chỗ. */ e=>reply({ok:false,error:String(e.message||e)})).finally(/** Tác dụng: Dọn cờ hoặc trạng thái sau bước bất đồng bộ, kể cả khi lỗi. */ ()=>{busy=false;globalThis.cdrReadBusy=false;OpenSipsPage.flushRefresh?.();});return true;
   });
 })();

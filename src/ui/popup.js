@@ -1,10 +1,14 @@
+/** Tác dụng: Đọc state giám sát từ chrome.storage.local để popup hiển thị. */
 async function state() {
   const r = await chrome.storage.local.get("state");
   return r.state || null;
 }
+/** Tác dụng: Định dạng thời gian đã trôi qua từ lần cập nhật để giao diện thể hiện độ mới. */
 function age(ts){return ts ? Math.round((Date.now()-ts)/1000)+"s ago" : "-";}
-function esc(s){return String(s ?? "").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+/** Tác dụng: Escape ký tự HTML trong dữ liệu trước khi đưa vào giao diện. */
+function esc(s){return String(s ?? "").replace(/[&<>"]/g,/** Tác dụng: Thay ký tự hoặc đoạn khớp biểu thức bằng nội dung đã chuyển đổi trong esc. */ c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
+/** Tác dụng: Dựng bảng VT và cảnh báo từ state cho popup rút gọn. */
 async function render(){
   const s=await state();
   const app=document.querySelector("#app");
@@ -16,7 +20,7 @@ async function render(){
     html+=`<div class="card"><b>${g}</b> Traffic: <b>${gr.value ?? "-"}</b>
       <span class="muted">(${age(gr.updatedAt)})</span><table>
       <tr><th>FS</th><th>IP</th><th>VT</th><th>Profile</th></tr>`;
-    for(const n of os.nodes||[]){
+    for(const n of (os.nodes||[]).filter(n=>!Array.isArray(s.nodeDisplay?.[g])||s.nodeDisplay[g].includes(n.ip))){
       html+=`<tr><td>${esc(n.fs||"?")}</td><td>${esc(n.ip)}</td><td>${n.used}/${n.capacity}</td><td>${esc(n.description)}</td></tr>`;
     }
     html+="</table></div>";
@@ -25,7 +29,7 @@ async function render(){
   if((s.alerts||[]).length){
     html+=`<div class="card bad"><b>SUSPECTED BLOCK</b>`;
     for(const a of s.alerts){
-      const active=(s.freeswitch?.numbers||[]).find(n=>n.fs===a.fs && n.status==="ACTIVE");
+      const active=(s.freeswitch?.numbers||[]).find(/** Tác dụng: Tìm phần tử đầu tiên khớp điều kiện trong render. */ n=>n.fs===a.fs && n.status==="ACTIVE");
       html+=`<div>${a.group} → ${a.fs} (${a.ip}) VT=${a.currentVt}`+
         (active?` → ACTIVE ${esc(active.phone)}`:" → ACTIVE number not found")+`</div>`;
     }
@@ -35,5 +39,5 @@ async function render(){
   }
   app.innerHTML=html;
 }
-document.querySelector("#clear").onclick=async()=>{await chrome.runtime.sendMessage({type:"CLEAR"});render();};
+document.querySelector("#clear").onclick=/** Tác dụng: Mở hộp chọn thời gian cần xóa lịch sử; chưa xóa dữ liệu tại bước này. */ async()=>{await chrome.runtime.sendMessage({type:"CLEAR"});render();};
 render(); setInterval(render,2000);

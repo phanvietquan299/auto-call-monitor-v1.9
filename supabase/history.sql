@@ -7,6 +7,7 @@ create index if not exists call_monitor_history_at on call_monitor_private.histo
 alter table call_monitor_private.history enable row level security;
 alter table call_monitor_private.credentials enable row level security;
 revoke all on all tables in schema call_monitor_private from public, anon, authenticated;
+-- Tác dụng: Xác thực token để ghi/đọc/xóa lịch sử, khử trùng sự kiện và phân trang kết quả.
 create or replace function public.call_monitor_history(p_token text,p_action text,p_events jsonb default '[]',p_start bigint default null,p_end bigint default null,p_offset integer default 0)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare e jsonb; result jsonb; affected integer;

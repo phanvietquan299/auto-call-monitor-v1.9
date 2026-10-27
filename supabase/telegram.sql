@@ -6,6 +6,7 @@ alter table call_monitor_private.remote_runtime enable row level security;
 alter table call_monitor_private.remote_commands enable row level security;
 alter table call_monitor_private.remote_notices enable row level security;
 revoke all on all tables in schema call_monitor_private from public,anon,authenticated;
+-- Tác dụng: Xác thực bridge và quản lý snapshot, nhận lệnh, ACK cùng các dấu chống lặp remote.
 create or replace function public.call_monitor_remote(p_token text,p_action text,p_payload jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
 declare now_ms bigint=(extract(epoch from clock_timestamp())*1000)::bigint; runtime call_monitor_private.remote_runtime; command call_monitor_private.remote_commands; fresh boolean; count_changed integer;
 begin
