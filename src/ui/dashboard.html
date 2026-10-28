@@ -26,6 +26,10 @@ button.on{background:#39d98a;color:#07130d}button.off{background:#ff667a;color:#
 button.secondary{background:#e9edf3;color:#111}
 main{width:min(1600px,100%);margin:auto;padding:16px clamp(12px,3vw,32px) 32px;display:grid;gap:16px}
 .card{background:var(--card);border-radius:16px;padding:clamp(12px,2vw,20px);min-width:0;overflow:hidden}
+#summary{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(12px,2vw,20px);min-width:0}
+#summary:empty{display:none}
+#summary>.card{line-height:1.55;overflow-wrap:anywhere}
+#summary>.card>b{display:block;margin-bottom:6px}
 #groups{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
 #confirmations:empty,#confirmation-status:empty{display:none}
 #confirmation-status{padding:12px;border:1px solid var(--line);border-radius:10px}

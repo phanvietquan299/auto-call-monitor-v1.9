@@ -153,6 +153,7 @@ let statusWriteInProgress=false;
 async function sendFreeSwitchStatus(state,tabId,payload,automatic=false){
   const live=await getState();
   if(!Detection.isNumberNodeSelected(live,payload.fs,payload.profile))return {ok:false,attempted:false,errorCode:'NODE_NOT_SELECTED',error:'Node không được chọn monitor; không đổi trạng thái số'};
+  if(Detection.collectionHardStop(payload.profile==='COLLECTION'?'99.153':'99.155',Date.now()))return {ok:false,attempted:false,errorCode:'SCHEDULE_STOP',error:'Collection dừng cứng 18:05–08:00; không đổi trạng thái số'};
   // Reserve before sending; the DOM can update before the SQLite transaction
   // finishes. Reserve a longer quiet period for unattended automatic writes.
   const gap=Math.max(3000,automatic?(state.config.freeSwitchAutomaticGapMs||3000):(state.config.freeSwitchActionGapMs||3000));

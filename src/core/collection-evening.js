@@ -1,4 +1,4 @@
-/* Collection uses the 1.17.24 policy, with one final confirmed locked change after 18:00. */
+/* Collection final-change window: 18:00–18:05; hard stop after 18:05. */
 (/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ function(root){
  const members=['FS01','FS02','FS03','FS04','OS01'];
  const detection=root.Detection||(typeof require==='function'?require('./detection'):null);
@@ -14,7 +14,7 @@
  function eveningDate(now){const t=phase(now);return t.minute>=1080?t.date:t.minute<480?t.previousDate:null;}
  /** Tác dụng: Tìm lần đổi số Collection đã xác nhận sau 18:00 làm mốc kết thúc ngày. */
  function finalChange(state,now){
-  const date=eveningDate(now);if(!date)return null;
+  const date=eveningDate(now);if(!date||detection.collectionHardStop('99.153',now))return null;
   const saved=state.collectionEvening;
   if(saved?.date===date&&['RUNNING','FINAL_CONFIRMED','NIGHT','FAILED'].includes(saved.status)&&saved.policy===27)return null;
   const end=Date.parse(date+'T18:00:00+07:00');

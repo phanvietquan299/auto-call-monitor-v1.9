@@ -23,7 +23,7 @@ async function switchTab(url){
   if(group&&typeof openSipsTabWithRole==='function')return openSipsTabWithRole(group,'LOAD_BALANCER');
   const tabs=await chrome.tabs.query({url});if(tabs.length!==1)throw Error('Cần mở đúng một tab: '+url);return tabs[0].id;}
 /** Tác dụng: Gửi lệnh tới content script và từ chối kết quả không xác nhận thành công. */
-async function switchCommand(id,msg){if(msg.type==='FS_SWITCH_SET_GROUP'){const live=await getState();if(!Detection.isNodeSelected(live,{group:msg.group,ip:msg.node?.ip}))throw Error('Node không được chọn monitor; không đổi Group ID');}const r=await chrome.tabs.sendMessage(id,msg);if(!r?.ok)throw Error(r?.error||'Trang không xác nhận thành công.');return r;}
+async function switchCommand(id,msg){if(['AUTO_BLOCK_FS','MANUAL_FS_STATUS'].includes(msg.type)&&Detection.collectionHardStop(msg.profile==='COLLECTION'?'99.153':'99.155',Date.now()))throw Error('Collection nghỉ 18:05–08:00; không đổi số');if(msg.type==='FS_SWITCH_SET_GROUP'){const live=await getState();if(msg.value!==0&&Detection.collectionHardStop(msg.group,Date.now()))throw Error('Collection nghỉ 18:05–08:00; không bật node');if(!Detection.isNodeSelected(live,{group:msg.group,ip:msg.node?.ip}))throw Error('Node không được chọn monitor; không đổi Group ID');}const r=await chrome.tabs.sendMessage(id,msg);if(!r?.ok)throw Error(r?.error||'Trang không xác nhận thành công.');return r;}
 /** Tác dụng: Reload trang sau thao tác và chờ đọc lại Group ID đúng giá trị mong đợi. */
 async function refreshSwitchPage(tab,node,value,oldPageId){
   await chrome.tabs.reload(tab,{bypassCache:true});

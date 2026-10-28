@@ -9,7 +9,7 @@
     saleCooldownMs:30000,saleRecoverySamples:8,saleRecoveryStableMs:20000,
     saleRecoveryMinVt:0,saleRecoveryTrafficFloor:4,saleRecoveryRangeFloor:2,
     recoveryRangeRatio:0.35,recoveryTrafficFloor:50,recoveryStableMs:60000,recoveryDelayedMs:300000,backupBlockWaitMs:5000,rotationBackupGraceMs:30000,slowBaselineStableMs:60000,
-    workdayStartMinute:480,collectionDayEndMinute:1080,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
+    workdayStartMinute:480,collectionDayEndMinute:1085,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
   const median=/** Tác dụng: Tính trung vị các giá trị hữu hạn để giảm ảnh hưởng của mẫu VT nhiễu. */ values=>{const a=values.filter(Number.isFinite).slice().sort(/** Tác dụng: So sánh hai phần tử để xác định thứ tự ưu tiên trong median. */ (a,b)=>a-b);const i=Math.floor(a.length/2);return a.length?(a.length%2?a[i]:(a[i-1]+a[i])/2):null;};
   const keyOf=/** Tác dụng: Tạo khóa state duy nhất từ nhóm, tên FS và địa chỉ IP. */ a=>`${a.group}|${a.fs}|${a.ip}`;
   /** Tác dụng: Ghi sự kiện một lần theo sự cố/loại và giới hạn thời gian log hiển thị. */
@@ -32,16 +32,22 @@
     const local=new Date(now+7*60*60*1000),minute=local.getUTCHours()*60+local.getUTCMinutes();
     const date=local.toISOString().slice(0,10);
     const start=group==='99.153'?c.collectionPauseStartMinute:c.scheduledPauseStartMinute;
-    const eveningEnd=group==='99.153'?(c.collectionDayEndMinute??1080):(c.saleDayEndMinute??1020);
+    const eveningEnd=group==='99.153'?1085:(c.saleDayEndMinute??1020);
     const earlyMorning=minute<(c.workdayStartMinute??480);
     const dayEnd=earlyMorning||minute>=eveningEnd;
     const nightDate=earlyMorning?new Date(local.getTime()-86400000).toISOString().slice(0,10):date;
     return {paused:dayEnd||minute>=start&&minute<c.scheduledPauseEndMinute,
-      startAt:dayEnd?(group==='99.153'?'18:00':'17:00'):group==='99.153'?'12:10':'11:40',
+      startAt:dayEnd?(group==='99.153'?'18:05':'17:00'):group==='99.153'?'12:10':'11:40',
       endAt:dayEnd?'08:00':'13:00',
       phase:dayEnd?'DAY_END':group==='99.155'&&minute>=c.scheduledHandoffMinute?'HANDOFF':'LUNCH',
       cycle:dayEnd?`${nightDate}|DAY_END`:`${date}|${minute>=c.scheduledPauseEndMinute?'AFTER':'BEFORE'}`,
       pauseId:`${dayEnd?nightDate:date}|${dayEnd?'DAY_END':'LUNCH'}`};
+  }
+  /** Tác dụng: Chặn cứng Collection từ 18:05 đến 08:00, độc lập snapshot hoặc cấu hình cũ. */
+  function collectionHardStop(group,now){
+    if(group!=='99.153')return false;
+    const local=new Date(now+25200000),minute=local.getUTCHours()*60+local.getUTCMinutes();
+    return minute>=1085||minute<480;
   }
   const pausedFor=/** Tác dụng: Kiểm tra nhóm có đang bị tạm dừng theo lịch đã tính trong state không. */ (s,group)=>!!s.schedule?.groups?.[group]?.paused;
   /** Tác dụng: Giới hạn phạm vi quản lý theo IP đã tick; giữ lựa chọn mặc định trước lần lưu đầu tiên. */
@@ -64,7 +70,7 @@
       const was=isNodeSelected({nodeDisplay:previous},f),selected=isNodeSelected(s,f);
       if(was===selected)continue;
       const i=f.incident,protectedAction=i&&(i.locked||i.actionPending||i.actionUncertain||i.autoExecuted||i.manualExecuted);
-      f.os01CdrRun=null;f.pairedCdrProof=null;f.cdrBackup=null;f.postSwapWatch=null;
+      f.os01CdrRun=null;f.cdrFailureRun=null;f.pairedCdrProof=null;f.cdrBackup=null;f.postSwapWatch=null;
       f.history=[];f.healthyHistory=[];f.baseline=null;f.baselineVt=null;f.recentMedian=null;f.dropPercent=null;
       f.vtDropAt=null;f.vtDeclineAt=null;f.scheduledCdrAt=null;f.cdrEnabledAt=now;
       if(!protectedAction){
@@ -93,7 +99,8 @@
         const local=new Date(now+25200000),date=local.toISOString().slice(0,10),minute=local.getUTCHours()*60+local.getUTCMinutes();
         const previousDate=new Date(local.getTime()-86400000).toISOString().slice(0,10),eveningDate=minute>=1080?date:minute<480?previousDate:null;
         const saved=s.collectionEvening,stopped=saved?.date===eveningDate&&(saved.status==='NIGHT'||saved.policy===27&&['FINAL_CONFIRMED','RUNNING','FAILED'].includes(saved.status));
-        if(eveningDate&&!stopped&&(minute>=1080||saved?.policy===27&&saved.date===eveningDate&&saved.status==='WAIT_FINAL'))Object.assign(current,{paused:false,phase:'FINAL_CHANGE',cycle:eveningDate+'|AFTER',endAt:'08:00'});
+        if(eveningDate&&stopped)Object.assign(current,{paused:true,phase:'DAY_END',startAt:'18:05',endAt:'08:00',cycle:eveningDate+'|DAY_END',pauseId:eveningDate+'|DAY_END'});
+        if(eveningDate&&!stopped&&minute>=1080&&minute<1085)Object.assign(current,{paused:false,phase:'FINAL_CHANGE',cycle:eveningDate+'|AFTER',endAt:'08:00'});
       }
       const entering=current.paused&&(!previous?.paused||previous.pauseId!==current.pauseId);
       const resuming=!current.paused&&(previous?.paused||previous&&previous.cycle!==current.cycle);
@@ -285,9 +292,9 @@
   const os01CdrPolicy=/** Tác dụng: Giới hạn ngoại lệ hai lượt Search CDR cho đúng OS01 Collection tại IP 10.10.99.140. */ f=>f.group==='99.153'&&f.fs==='OS01'&&f.ip==='10.10.99.140';
   /** Tác dụng: Kiểm tra độ mới, nhóm/IP, số ACTIVE và chuỗi 5/5 của bằng chứng CDR riêng OS01. */
   function os01CdrEvidence(s,f,now){
-    const e=f.cdr?.decision,active=(s.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong os01CdrEvidence. */ n=>n.fs===f.fs&&n.profile==='COLLECTION'&&n.status==='ACTIVE');
+    const e=f.cdr?.decision,active=(s.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong os01CdrEvidence. */ n=>n.fs===f.fs&&n.profile===(f.group==='99.153'?'COLLECTION':'TELESALE')&&n.status==='ACTIVE');
     const after=Math.max(f.cdrEnabledAt||0,f.incident?.switchedAt||0,f.lastIncident?.switchedAt||0);
-    const available=s.monitoringEnabled&&!pausedFor(s,f.group)&&isFsActive(s,f,now)&&
+    const available=s.monitoringEnabled&&!pausedFor(s,f.group)&&!collectionHardStop(f.group,now)&&isFsActive(s,f,now)&&
       now-f.updatedAt>=0&&now-f.updatedAt<=s.config.staleMs&&now-(s.freeswitch?.updatedAt||0)>=0&&now-(s.freeswitch?.updatedAt||0)<=s.config.staleMs&&
       active.length===1&&active[0].hasStatusControl;
     const fresh=!!(available&&e&&!e.error&&!e.observation&&e.group===f.group&&e.ip===f.ip&&e.phone===active[0].phone&&
@@ -295,41 +302,50 @@
       e.newestCallTime>=now-30000&&e.newestCallTime<=now+2000&&e.eligibleCount>0);
     return {e,phone:active.length===1?active[0].phone:null,after,available,fresh,bad:!!(fresh&&e.locked&&e.count===5)};
   }
-  /** Tác dụng: Đếm hai lượt Search OS01 liên tiếp lỗi 5/5; giữ khóa và lịch, cho phép xử lý không phụ thuộc VT tụt. */
-  function updateOs01Cdr(s,f,now){
-    const proof=os01CdrEvidence(s,f,now),{e,phone,after}=proof,i=f.incident;
-    if(i?.actionPending||i?.actionUncertain||i?.locked&&!i.autoExecuted&&!i.manualExecuted){
-      f.detectionNote=i.actionPending?'OS01: đang đổi số; chờ xác minh':'OS01: kết quả đổi số chưa xác minh; không tự gửi lại';return;
-    }
-    const handled=i?.autoExecuted||i?.manualExecuted;
-    let run=f.os01CdrRun;
-    if(!run||run.phone!==phone||run.after!==after)run=f.os01CdrRun={phone,after,count:0,checkedAt:0};
+  /** Tác dụng: Đếm kết quả Search 5/5 riêng biệt cho cùng số; lỗi, quá hạn hoặc đổi số sẽ reset. */
+  function updateCdrFailureRun(s,f,now,proof=os01CdrEvidence(s,f,now)){
+    const key=os01CdrPolicy(f)?'os01CdrRun':'cdrFailureRun',limit=os01CdrPolicy(f)?2:3;
+    const {e,phone,after}=proof;
+    let run=f[key];
+    if(!run||run.phone!==phone||run.after!==after)run=f[key]={phone,after,count:0,checkedAt:0};
     if(!proof.bad){run.count=0;run.checkedAt=e?.checkedAt||0;}
     else if(e.checkedAt>run.checkedAt){
-      run.count=run.checkedAt&&e.checkedAt-run.checkedAt<=15000?Math.min(2,run.count+1):1;
-      run.checkedAt=e.checkedAt;
+      const gap=e.checkedAt-run.checkedAt;
+      if(!run.checkedAt||gap>15000){run.count=1;run.firstAt=e.checkedAt;run.checkedAt=e.checkedAt;}
+      else if(os01CdrPolicy(f)||gap>=2000){run.count=Math.min(limit,run.count+1);run.checkedAt=e.checkedAt;}
     }
+    return run;
+  }
+  /** Tác dụng: Xử lý CDR độc lập VT sau 2 lượt OS01 hoặc 3 lượt node khác; giữ nguyên khóa và lịch. */
+  function updateCdrOnlyIncident(s,f,now){
+    const proof=os01CdrEvidence(s,f,now),{e,phone,after}=proof,i=f.incident;
+    if(i?.actionPending||i?.actionUncertain||i?.locked&&!i.autoExecuted&&!i.manualExecuted){
+      f.detectionNote=i.actionPending?`${f.fs}: đang đổi số; chờ xác minh`:`${f.fs}: kết quả đổi số chưa xác minh; không tự gửi lại`;return;
+    }
+    const handled=i?.autoExecuted||i?.manualExecuted;
+    const limit=os01CdrPolicy(f)?2:3,label=os01CdrPolicy(f)?'OS01':f.fs;
+    const run=updateCdrFailureRun(s,f,now,proof);
     if(!proof.available){
       if(!i?.locked)f.state=isFsActive(s,f,now)?'WAITING_CDR':'INACTIVE';
-      f.detectionNote='OS01: chờ dữ liệu mới, Group ID 2 và đúng một số ACTIVE';return;
+      f.detectionNote=`${label}: chờ dữ liệu mới, Group ID đang bật và đúng một số ACTIVE`;return;
     }
     if(handled){
       f.state='RECOVERING';
       if(proof.fresh&&!e.locked){
         f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.pairedCdrProof=null;
-        f.state='HEALTHY';f.detectionNote='OS01: CDR mới đã hết chuỗi lỗi sau đổi số';return;
+        f.state='HEALTHY';f.detectionNote=`${label}: CDR mới đã hết chuỗi lỗi sau đổi số`;return;
       }
-      if(!proof.bad||run.count<2||now-i.switchedAt<(s.config.backupBlockWaitMs??5000)||phone===i.oldPhone){
-        f.detectionNote=`OS01: chờ CDR của số mới sau đổi · ${run.count}/2 lượt lỗi 5/5`;return;
+      if(!proof.bad||run.count<limit||now-i.switchedAt<(s.config.backupBlockWaitMs??5000)||phone===i.oldPhone){
+        f.detectionNote=`${label}: chờ CDR của số mới sau đổi · ${run.count}/${limit} lượt lỗi 5/5`;return;
       }
       f.lastIncident=i;f.incident=null;
       f.cdrBackup={previousPhone:i.oldPhone,parentIncidentId:i.id,attemptedPhones:[...new Set([...(i.attemptedPhones||[]),i.oldPhone])]};
     }
-    if(!proof.bad||run.count<2){
+    if(!proof.bad||run.count<limit){
       if(f.incident&&!f.incident.locked){f.lastIncident={...f.incident,cancelled:true,closed:true,closedAt:now};f.incident=null;f.candidateId=null;}
       f.pairedCdrProof=null;
       f.state=proof.bad?'WARNING':proof.fresh?'HEALTHY':'WAITING_CDR';
-      f.detectionNote=`OS01: ${run.count}/2 lượt Search liên tiếp lỗi 5/5; không yêu cầu VT tụt`;return;
+      f.detectionNote=`${label}: ${run.count}/${limit} lượt Search liên tiếp lỗi 5/5; không yêu cầu VT tụt`;return;
     }
     const rejected=i?.cancelled?i:f.lastIncident?.cancelled?f.lastIncident:null;
     if(rejected?.rejectedCdrCalls&&rejected.rejectedCdrCalls===e.callIds?.join('|')){f.state='WARNING';return;}
@@ -339,11 +355,11 @@
         ...(backup?{isBackup:true,...backup}:{})};
       f.cdrBackup=null;f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
     }
-    const current=f.incident;current.os01CdrOnly=true;current.cdrConfirmationReads=run.count;
+    const current=f.incident;if(os01CdrPolicy(f))current.os01CdrOnly=true;else current.cdrThreeSearch=true;current.cdrConfirmationReads=run.count;
     delete current.manualCdrProof;
     f.candidateId=current.id;f.startedAt=current.startedAt;f.activeBeforeIncident=true;f.state='SUSPECTED';
     e.incidentId=current.id;f.cdr.incidentId=current.id;f.pairedCdrProof=null;
-    f.detectionNote='OS01: đã xác nhận 2 lượt Search liên tiếp lỗi 5/5; xử lý dù VT không tụt';
+    f.detectionNote=`${label}: đã xác nhận ${limit} lượt Search liên tiếp lỗi 5/5; xử lý dù VT không tụt`;
   }
   /** Tác dụng: Cập nhật sự cố CDR, bằng chứng kết hợp, phục hồi và nhu cầu dùng số dự phòng. */
   function updateCdrStates(s,now){
@@ -357,7 +373,10 @@
         f.state='WAITING_CDR';
         s.pendingAutoActions=(s.pendingAutoActions||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong updateCdrStates. */ a=>a.incidentId!==old.id);
       }
-      if(os01CdrPolicy(f)){updateOs01Cdr(s,f,now);continue;}
+      if(os01CdrPolicy(f)){updateCdrOnlyIncident(s,f,now);continue;}
+      const failureRun=updateCdrFailureRun(s,f,now);
+      if(failureRun.count>=3||f.incident?.cdrThreeSearch){updateCdrOnlyIncident(s,f,now);continue;}
+
       if(!isFsActive(s,f,now)||pausedFor(s,f.group)||!s.monitoringEnabled)continue;
       // Retire the old perpetual watcher; a completed recovery cannot authorize a new backup.
       f.postSwapWatch=null;
@@ -438,11 +457,11 @@
   /** Tác dụng: Kiểm tra bằng chứng CDR đủ để cho phép thao tác tại thời điểm hiện tại và trả lý do khi chặn. */
   function cdrGate(s,f,now){
     if(!isNodeSelected(s,f))return {ready:false,reason:'Node không được chọn monitor; không can thiệp'};
-    if(cdrPrimary(s)&&os01CdrPolicy(f)){
-      const proof=os01CdrEvidence(s,f,now),run=f.os01CdrRun,i=f.incident;
-      const ready=!!(proof.bad&&run?.count>=2&&run.checkedAt===proof.e.checkedAt&&run.phone===proof.phone&&run.after===proof.after&&
-        i?.os01CdrOnly&&!i.locked&&!i.cancelled&&!i.actionPending&&!i.actionUncertain&&i.oldPhone===proof.phone&&proof.e.incidentId===i.id);
-      return {ready,reason:i?.actionPending?'OS01: đang đổi số; chờ xác minh':i?.actionUncertain?'OS01: kết quả đổi số chưa xác minh; kiểm tra FreeSWITCH':ready?'OS01: 2 lượt Search lỗi 5/5; không yêu cầu VT tụt':`OS01: chờ 2 lượt Search liên tiếp lỗi 5/5 (${run?.count||0}/2)`};
+    if(cdrPrimary(s)&&(os01CdrPolicy(f)||f.incident?.cdrThreeSearch)){
+      const proof=os01CdrEvidence(s,f,now),special=os01CdrPolicy(f),limit=special?2:3,run=special?f.os01CdrRun:f.cdrFailureRun,i=f.incident;
+      const ready=!!(proof.bad&&run?.count>=limit&&run.checkedAt===proof.e.checkedAt&&run.phone===proof.phone&&run.after===proof.after&&
+        (special?i?.os01CdrOnly:i?.cdrThreeSearch)&&!i.locked&&!i.cancelled&&!i.actionPending&&!i.actionUncertain&&i.oldPhone===proof.phone&&proof.e.incidentId===i.id);
+      return {ready,reason:i?.actionPending?'OS01: đang đổi số; chờ xác minh':i?.actionUncertain?'OS01: kết quả đổi số chưa xác minh; kiểm tra FreeSWITCH':ready?`${f.fs}: ${limit} lượt Search lỗi 5/5; không yêu cầu VT tụt`:`${f.fs}: chờ ${limit} lượt Search liên tiếp lỗi 5/5 (${run?.count||0}/${limit})`};
     }
     if(f.incident?.lowVtFallback)return {ready:false,reason:'Đã bỏ cơ chế VT < 10; chờ đánh giá VT kết hợp CDR mới'};
     if(!cdrPrimary(s)&&s.config?.cdrVerificationEnabled!==true)return {ready:true};
@@ -795,6 +814,6 @@
     }
     refreshAlerts(s,now);
   }
-  const api={isNodeSelected,isNumberNodeSelected,applyNodeSelection,os01CdrPolicy,os01CdrEvidence,activationBlockReady,hybridVtReady,relearnHybridBaseline,pairedCdrProof,manualCdrProof,cdrVtDrop,cdrPrimary,updateCdrStates,preBlockRebounding,cdrGate,groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
+  const api={collectionHardStop,isNodeSelected,isNumberNodeSelected,applyNodeSelection,os01CdrPolicy,os01CdrEvidence,activationBlockReady,hybridVtReady,relearnHybridBaseline,pairedCdrProof,manualCdrProof,cdrVtDrop,cdrPrimary,updateCdrStates,preBlockRebounding,cdrGate,groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
   if(typeof module!=='undefined')module.exports=api;else root.Detection=api;
 })(globalThis);

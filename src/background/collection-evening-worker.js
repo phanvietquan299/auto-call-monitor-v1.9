@@ -13,6 +13,11 @@ async function runCollectionEvening(state){
  if(time.minute>=1080&&state.collectionEvening?.date!==time.date){
   state.collectionEvening={policy:27,date:time.date,status:'WAIT_FINAL'};await saveState(state);
  }
+ // Hết cửa sổ 18:00–18:05 thì nghỉ đêm dù chưa có lượt đổi cuối.
+ if((time.minute>=1085||time.minute<480)&&state.collectionEvening?.policy===27&&state.collectionEvening.status==='WAIT_FINAL'){
+  state.collectionEvening={...state.collectionEvening,status:'FINAL_CONFIRMED',stopReason:'HARD_STOP_18_05'};
+  Detection.applySchedule(state,Date.now());await saveState(state);
+ }
  const final=CollectionEvening.finalChange(state,Date.now());
  if(final){state.collectionEvening={policy:27,date:final.date,status:'FINAL_CONFIRMED',finalIncidentId:final.incidentId,finalAt:final.at};Detection.applySchedule(state,Date.now());await saveState(state);}
  const rotation=await chrome.storage.local.get('fsSwitch');

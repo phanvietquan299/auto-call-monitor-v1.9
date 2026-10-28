@@ -14,6 +14,7 @@ async function openSipsTabWithRole(group,role){
 /** Tác dụng: Chọn tab OpenSIPS đã đăng nhập, yêu cầu Search CDR và kiểm tra nhóm/IP của kết quả. */
 async function queryCdr(group,fs,ip){
   const live=await getState();if(!Detection.isNodeSelected(live,{group,fs,ip}))throw Error('Node không được chọn monitor; không Search CDR');
+  if(Detection.collectionHardStop(group,Date.now()))throw Error('Collection nghỉ 18:05–08:00; không Search CDR');
   // A logged-in OpenSIPS tab can fetch CDR directly, regardless of visible tool.
   const tabs=await chrome.tabs.query({url:`http://10.10.${group}/*`});
   const available=[];
@@ -34,7 +35,7 @@ function cdrAfter(f,now){return Math.max(now-30000,(f.incident?.startedAt||f.sta
 function scheduleCdrChecks(state,feature){
   if(!state.config.cdrObservationEnabled&&!state.config.cdrVerificationEnabled)return;
   for(const group of ['99.153','99.155']){
-    if(cdrJobs.has(group))continue;
+    if(cdrJobs.has(group)||Detection.collectionHardStop(group,Date.now()))continue;
     const candidates=Object.values(state.fsStates).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong scheduleCdrChecks. */ f=>f.group===group&&Cdr.IPS[f.fs]===f.ip&&Detection.isFsActive(state,f,Date.now())&&Date.now()-f.updatedAt<=state.config.staleMs);
     const fresh=candidates.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong scheduleCdrChecks. */ f=>Date.now()-(f.cdr?.checkedAt||0)>=2000)
       .sort(/** Tác dụng: So sánh hai phần tử để xác định thứ tự ưu tiên trong scheduleCdrChecks. */ (a,b)=>(a.cdr?.checkedAt||0)-(b.cdr?.checkedAt||0)||a.fs.localeCompare(b.fs));
