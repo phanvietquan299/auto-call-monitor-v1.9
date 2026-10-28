@@ -1,3 +1,11 @@
+1.17.44: App/Vercel xếp hàng thao tác thay vì từ chối lệnh thứ hai; hiện từng yêu cầu chờ/đang chạy/hoàn tất. Giữ thứ tự gửi, chống bấm trùng, hủy yêu cầu chưa gửi khi đổi phiên hoặc chờ quá 90 giây. Bật/tắt FS chỉ khóa node đang chờ, cho chọn node khác.
+
+1.17.43: Ô chọn nhóm nạp đổi thành checkbox vuông tương phản rõ; cho chọn COLL, TLS hoặc cả hai. Chỉ đọc các sheet được tick; đổi lựa chọn hủy preview cũ. Hỗ trợ đồng thời trên desktop/mobile/Vercel, kiểm tra scope từng nhóm tại máy nguồn.
+
+1.17.42: Đồng bộ nút nạp số giữa các trạng thái, giữ nhãn Nạp số ngắn gọn; chỉ hiện FS/số còn thiếu trong preview. Khóa tập số ứng viên theo preview, không nạp lại số đã có nếu bị xóa sau khi xem trước.
+
+1.17.41: Nạp Excel trên dashboard dưới bảng Sale và trên Vercel qua Supabase; bắt buộc chọn COLL/TLS, chỉ gửi số/IP của sheet đã chọn. Kiểm tra mapping, scope và số trùng ở máy nguồn; xác minh API server, khóa yêu cầu lặp/gián đoạn. Sửa bộ đếm 3 lượt CDR bị reset bởi cập nhật giao diện khi Search chậm.
+
 1.17.40: Node được tick là phạm vi monitor/can thiệp của bản extension: bỏ tick dừng lấy CDR, chặn BLOCK và bật/tắt/thay FS kể cả lệnh cũ hoặc remote. Hủy yêu cầu chưa gửi, giữ khóa/kết quả thao tác đã gửi; tick lại học dữ liệu mới. Lịch Collection chỉ xử lý node được chọn, không Reload toàn nhóm khi có node ngoài phạm vi.
 
 1.17.39: Riêng OS01 Collection (10.10.99.140), hai lượt Search liên tiếp đều xác nhận CDR lỗi 5/5 cho phép xử lý dù VT không tụt. Ngắt chuỗi khi CDR lỗi đọc/hết lỗi/cũ hoặc số ACTIVE đổi; giữ lịch nghỉ, chế độ tay/tự động và khóa chống gửi lặp.

@@ -323,6 +323,14 @@ let messageQueue=Promise.resolve();
 /** Tác dụng: Tiếp nhận lệnh dashboard/content script, tuần tự hóa thay đổi và trả kết quả cho bên gọi. */
 function handleMainMessage(msg,sender,sendResponse){
   if(msg.type?.startsWith('FS_SWITCH_'))return;
+  if(['PHONE_IMPORT_PREVIEW','PHONE_IMPORT_EXECUTE'].includes(msg.type)){PhoneImportWorker.handle(msg).then(sendResponse);return true;}
+  if(msg.type==='PHONE_IMPORT_CONTEXT'){
+    // Keep the same single-FreeSWITCH-tab rule as number status writes.
+    if(!sender.tab?.id||!sender.tab.url?.startsWith('http://10.10.101.67:5003/')){sendResponse({ok:false,error:'Chỉ nạp từ tab FreeSWITCH'});return;}
+    chrome.tabs.query({url:'http://10.10.101.67:5003/*'}).then(tabs=>{
+      sendResponse(tabs.length===1&&tabs[0].id===sender.tab.id?{ok:true}:{ok:false,error:'Chỉ mở một tab FreeSWITCH khi nạp Excel để tránh gửi trùng'});
+    }).catch(error=>sendResponse({ok:false,error:String(error.message||error)}));return true;
+  }
   // Bỏ qua mẫu Grafana từ tab cũ, không đọc/ghi storage hay chạy detection.
   if(msg.type==='GRAFANA_SAMPLE'){sendResponse({ok:true,ignored:true});return;}
   if(msg.type==='HISTORY_READ'&&typeof CloudHistory!=='undefined'){
@@ -674,6 +682,6 @@ chrome.runtime.onInstalled.addListener(/** Tác dụng: Khởi tạo các alarm 
 chrome.runtime.onStartup.addListener(/** Tác dụng: Khởi tạo các alarm cần thiết khi extension được cài hoặc Chrome khởi động. */ ()=>{ensureOpenSipsAlarm().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});});
 ensureOpenSipsAlarm().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính. */ ()=>{});
 
-importScripts("cdr-worker.js", "fs-switch-worker.js", "collection-evening-worker.js");
+importScripts("cdr-worker.js", "fs-switch-worker.js", "collection-evening-worker.js", "../core/phone-import.js", "phone-import-worker.js");
 
 try{importScripts("telegram-worker.js");}catch(error){console.warn("Telegram bridge unavailable");}

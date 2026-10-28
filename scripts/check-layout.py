@@ -52,7 +52,7 @@ for html in [*(ROOT / 'src/ui').glob('*.html'), ROOT / 'mobile-app/index.html']:
         local_file(html.parent, reference)
 
 mobile = ROOT / 'mobile-app'
-for name, folder in [('dashboard.js', 'ui'), ('dashboard-fs-switch.js', 'ui'), ('fs-switch.js', 'core'), ('history-export.js', 'core')]:
+for name, folder in [('dashboard.js', 'ui'), ('dashboard-fs-switch.js', 'ui'), ('dashboard-phone-import.js', 'ui'), ('phone-import.js', 'core'), ('fs-switch.js', 'core'), ('history-export.js', 'core')]:
     check((mobile / name).read_bytes() == (ROOT / 'src' / folder / name).read_bytes(), f'Outdated mobile asset: {name}; run scripts/build-mobile.py')
 for name in ['adapter.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png']:
     check((mobile / name).read_bytes() == (ROOT / 'src/mobile' / name).read_bytes(), f'Outdated PWA source: {name}')

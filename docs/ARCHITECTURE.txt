@@ -68,3 +68,15 @@ npm test (node --test tests/*.test.js): toàn bộ mô phỏng; không thao tác
 Test local nằm trong tests, import/read source ở src theo đường dẫn mới.
 Khi đổi đường dẫn, cập nhật manifest, worker imports, HTML, build, test và tài liệu.
 Quy tắc làm việc tại AGENTS.md; không tự động commit khi chưa được yêu cầu.
+
+NẠP SỐ EXCEL (1.17.41)
+- src/core/phone-import.js đọc XLSX cục bộ, chỉ sheet COLL/TLS đã chọn và map IP public.
+- src/ui/dashboard-phone-import.js dùng chung trên desktop/PWA, dưới bảng Sale; chỉ gửi số/IP chuẩn hóa qua transport.
+- src/background/phone-import-worker.js giữ preview 10 phút và receipts chống lặp, kiểm tra lại scope/mapping/inventory; không giữ hàng đợi monitor trong lúc nạp.
+- src/content/phone-import.js là adapter API trong tab FreeSWITCH đã đăng nhập, không chèn giao diện; khóa batch chưa xác minh qua reload.
+- PHONE_IMPORT_PREVIEW/EXECUTE đi qua bridge Supabase hiện có. supabase/phone-import.sql chỉ mở rộng hai lệnh đã xác thực và xóa entries khỏi lệnh hoàn tất/hết hạn.
+
+HÀNG ĐỢI APP (1.17.44)
+- Adapter mobile giữ tối đa 10 yêu cầu đang chờ trong bộ nhớ trang, chỉ gửi yêu cầu kế tiếp sau khi có kết quả yêu cầu trước. Không tự retry kết quả chưa rõ.
+- Các thao tác trùng đang chờ dùng chung kết quả. Đổi phiên đăng nhập hoặc chờ quá 90 giây thì hủy yêu cầu chưa gửi. GET_STATE/HISTORY_READ vẫn đọc độc lập.
+- Giữ app mở khi có yêu cầu chưa gửi; cập nhật app bị khóa đến khi hàng đợi trống. Nút node chỉ khóa đúng FS đang chờ, không khóa các FS khác.

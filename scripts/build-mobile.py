@@ -11,8 +11,8 @@ for name in ['adapter.js','sw.js','manifest.webmanifest','icon.svg','icon-192.pn
 version=json.loads((root/'manifest.json').read_text())['version']
 config=json.loads((root/'config/supabase-config.js').read_text().split('=',1)[1].strip().rstrip(';'))
 (out/'config.js').write_text('globalThis.MobileConfig='+json.dumps({'anonKey':config['anonKey']})+';\n')
-for name in ['dashboard.js','dashboard-fs-switch.js']:(out/name).write_text((ui/name).read_text())
-for name in ['fs-switch.js','history-export.js']:(out/name).write_text((root/'src/core'/name).read_text())
+for name in ['dashboard.js','dashboard-fs-switch.js','dashboard-phone-import.js']:(out/name).write_text((ui/name).read_text())
+for name in ['fs-switch.js','history-export.js','phone-import.js']:(out/name).write_text((root/'src/core'/name).read_text())
 s=(ui/'dashboard.html').read_text().replace('src="../core/','src="').replace('<html lang="en">','<html lang="vi">')
 s=s.replace('<title>Auto Call Monitor</title>','<title>Auto Call Monitor</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0d172b"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png">')
 s=s.replace('<body>','''<body>
@@ -22,7 +22,11 @@ s=s.replace('<script src="fs-switch.js">','<script src="config.js"></script><scr
 s=s.replace('<div class="fs-switch-inline">','<details class="mobile-advanced"><summary>Ngưỡng BACKUP &amp; đặt trước FS</summary><div class="fs-switch-inline">',1)
 s=s.replace('    </div>\n  </div>\n</header>','</details>\n    </div>\n  </div>\n</header>',1)
 s=s.replace('<div id="mobile-link-controls">' ,'<div id="mobile-link-controls" hidden>')
+s=s.replace('<main>','<main><section id="mobile-command-queue" class="card" hidden aria-live="polite"><div class="mobile-command-heading"><b>YÊU CẦU TRÊN MÁY NÀY</b><span id="mobile-command-count" class="muted"></span></div><div id="mobile-command-items"></div><small class="muted">Giữ app mở để gửi các yêu cầu đang chờ.</small></section>')
 s=s.replace('</style>','''#mobile-login[hidden]{display:none!important}
+#mobile-command-queue[hidden]{display:none!important}
+#mobile-command-items{max-height:340px;overflow:auto;margin-bottom:10px}
+.mobile-command-heading{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;margin-bottom:8px}.mobile-command-entry{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}.mobile-command-entry>div{grid-column:1/-1;overflow-wrap:anywhere}.mobile-command-entry>b{overflow-wrap:anywhere}
 .mobile-session-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px max(12px,env(safe-area-inset-right)) 8px max(12px,env(safe-area-inset-left));font-size:12px}
 #mobile-connection{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}#mobile-version{margin-left:auto;white-space:nowrap}
 .mobile-advanced{grid-column:1/-1;width:100%;min-width:0}.mobile-advanced>summary{padding:12px 0;cursor:pointer;font-size:13px;color:var(--muted)}

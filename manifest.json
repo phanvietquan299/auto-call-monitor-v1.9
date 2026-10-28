@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Call Monitor V1.9",
-  "version": "1.17.40",
+  "version": "1.17.44",
   "description": "Persistent monitor dashboard for OpenSIPS VT/CDR with manual monitoring toggle and event log.",
   "permissions": [
     "storage",
@@ -43,7 +43,9 @@
         "http://10.10.101.67:5003/*"
       ],
       "js": [
-        "src/content/freeswitch.js"
+        "src/content/freeswitch.js",
+        "src/core/phone-import.js",
+        "src/content/phone-import.js"
       ],
       "run_at": "document_idle"
     }

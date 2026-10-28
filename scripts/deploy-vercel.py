@@ -8,7 +8,7 @@ parser.add_argument('--project')
 parser.add_argument('--team-id')
 parser.add_argument('--dry-run', action='store_true')
 args = parser.parse_args()
-allowed = ['adapter.js', 'config.js', 'dashboard.js', 'dashboard-fs-switch.js',
+allowed = ['adapter.js', 'config.js', 'dashboard.js','dashboard-phone-import.js','phone-import.js', 'dashboard-fs-switch.js',
            'fs-switch.js', 'history-export.js', 'index.html', 'sw.js', 'manifest.webmanifest',
            'icon.svg', 'icon-192.png', 'icon-512.png']
 files = []

@@ -2,6 +2,7 @@
   const el=/** Tác dụng: Lấy phần tử giao diện theo ID. */ id=>document.getElementById(id);
   const escape=/** Tác dụng: Escape nội dung trước khi ghép vào HTML của giao diện. */ s=>String(s??'').replace(/[&<>"]/g,/** Tác dụng: Thay ký tự hoặc đoạn khớp biểu thức bằng nội dung đã chuyển đổi trong escape. */ c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   let snapshot,selected,nodeSelected,busy=false,thresholdDirty=false;
+  const nodeJobs=new Set();
   /** Tác dụng: Gửi message tới extension và báo lỗi nếu handler không xác nhận thành công. */
   async function send(msg){const r=await chrome.runtime.sendMessage(msg);if(!r?.ok)throw Error(r?.error||'Mất kết nối extension');return r;}
   /** Tác dụng: Đọc snapshot thay FS và cập nhật control/preset khi không có thao tác giao diện đang bận. */
@@ -50,8 +51,8 @@
       const age=Date.now()-(snapshot.nodes?.[group]?.updatedAt||0),fresh=age>=0&&age<45000;
       const id=rows.length===1?rows[0].groupId:null;
       const known=fresh&&[0,policy.groupId].includes(id),active=known&&id===policy.groupId;
-      return `<button type="button" data-node-fs="${fs}" data-node-group="${group}" data-node-expected="${id}" class="${known?(active?'on':'off'):'secondary'}" aria-label="${fs}: ${known?(active?'đang hoạt động, bấm để tắt':'đang tắt, bấm để bật'):'chưa xác minh'}" aria-pressed="${active}" ${!known||busy?'disabled':''}>${fs==='OS01'?'OS01':Number(fs.slice(2))}</button>`;
-    }).join('')}<button type="button" class="secondary" data-node-reload="${group}" ${busy?'disabled':''}>Reload on Server</button></div>`;}).join('');
+      return `<button type="button" data-node-fs="${fs}" data-node-group="${group}" data-node-expected="${id}" class="${known?(active?'on':'off'):'secondary'}" aria-label="${fs}: ${known?(active?'đang hoạt động, bấm để tắt':'đang tắt, bấm để bật'):'chưa xác minh'}" aria-pressed="${active}" ${!known||busy||nodeJobs.has(group+'|'+fs)||nodeJobs.has(group+'|reload')?'disabled':''}>${fs==='OS01'?'OS01':Number(fs.slice(2))}</button>`;
+    }).join('')}<button type="button" class="secondary" data-node-reload="${group}" ${busy||[...nodeJobs].some(key=>key.startsWith(group+'|'))?'disabled':''}>Reload on Server</button></div>`;}).join('');
     const target=el('fs-node-buttons');if(target.innerHTML!==html)target.innerHTML=html;
   }
   el('fs-node-buttons').onclick=/** Tác dụng: Xử lý nút bật/tắt node hoặc Reload on Server của đúng nhóm. */ e=>{
@@ -65,19 +66,21 @@
   };
   /** Tác dụng: Yêu cầu Reload on Server cho đúng nhóm rồi làm mới snapshot giao diện. */
   async function reloadGroup(group){
-    busy=true;renderNodes();
+    const key=group+'|reload';if(nodeJobs.has(key))return;nodeJobs.add(key);renderNodes();
     confirmationNotice(`Đang Reload on Server · ${group==='99.153'?'Collection':'Sale'}…`);
     try{await send({type:'FS_SWITCH_RELOAD',group});confirmationNotice(`Reload on Server thành công · ${group==='99.153'?'Collection':'Sale'}.`);}
     catch(e){confirmationNotice(e.message);}
-    finally{busy=false;await refresh();}
+    finally{nodeJobs.delete(key);await refresh();}
   }
   el('fs-node-cancel').onclick=/** Tác dụng: Đóng hộp xác nhận bật/tắt node, không gửi thay đổi Group ID. */ ()=>{if(!busy){nodeSelected=null;el('fs-node-dialog').close();}};
   el('fs-node-dialog').addEventListener('cancel',/** Tác dụng: Giữ hộp thoại mở khi đang có thao tác ghi; nếu rảnh thì xóa lựa chọn tạm. */ e=>{if(busy)e.preventDefault();else nodeSelected=null;});
   el('fs-node-confirm').onclick=/** Tác dụng: Gửi lệnh bật/tắt Group ID đã xác nhận và cập nhật giao diện sau kết quả. */ async()=>{
-    if(busy||!nodeSelected)return;busy=true;el('fs-node-confirm').disabled=true;renderNodes();
-    try{const result=await send({type:'FS_SWITCH_TOGGLE_NODE',...nodeSelected});confirmationNotice(`${result.fs}: đã ${result.groupId===0?'tắt':'bật'} sau Save + Reload.`);}
+    if(busy||!nodeSelected)return;
+    const request={...nodeSelected},key=request.group+'|'+request.fs;
+    if(nodeJobs.has(key))return;nodeJobs.add(key);nodeSelected=null;el('fs-node-dialog').close();renderNodes();
+    try{const result=await send({type:'FS_SWITCH_TOGGLE_NODE',...request});confirmationNotice(`${result.fs}: đã ${result.groupId===0?'tắt':'bật'} sau Save + Reload.`);}
     catch(e){confirmationNotice(e.message);}
-    finally{busy=false;nodeSelected=null;el('fs-node-confirm').disabled=false;el('fs-node-dialog').close();await refresh();}
+    finally{nodeJobs.delete(key);await refresh();}
   };
   /** Tác dụng: Gửi cấu hình bật/tắt hoặc chế độ xử lý qua handler đã kiểm tra. */
   async function settings(enabled,mode){

@@ -1,7 +1,7 @@
 /* Remote commands pass through the same validated handlers as dashboard actions. */
 (/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ ()=>{
  const config=globalThis.SupabaseHistoryConfig;if(!config?.historyToken)return;
- const allowed=new Set(['MANUAL_FS_STATUS','DISMISS_CDR_WARNING','SET_MONITORING','SET_AUTO','SET_AUTO_BLOCK_MODE','CONFIRM_AUTO_BLOCK','CANCEL_AUTO_BLOCK','RECHECK_AUTO_BLOCK','ACK_MANUAL_AFTER_FAILURE','REPORT_MANUAL_SWAP','CLEAR_HISTORY','FS_SWITCH_SETTINGS','FS_SWITCH_THRESHOLD','FS_SWITCH_PRESET','FS_SWITCH_RELOAD','FS_SWITCH_TOGGLE_NODE','FS_SWITCH_CONFIRM','FS_SWITCH_RELEASE']);
+ const allowed=new Set(['MANUAL_FS_STATUS','DISMISS_CDR_WARNING','SET_MONITORING','SET_AUTO','SET_AUTO_BLOCK_MODE','CONFIRM_AUTO_BLOCK','CANCEL_AUTO_BLOCK','RECHECK_AUTO_BLOCK','ACK_MANUAL_AFTER_FAILURE','REPORT_MANUAL_SWAP','CLEAR_HISTORY','FS_SWITCH_SETTINGS','FS_SWITCH_THRESHOLD','FS_SWITCH_PRESET','FS_SWITCH_RELOAD','FS_SWITCH_TOGGLE_NODE','FS_SWITCH_CONFIRM','FS_SWITCH_RELEASE','PHONE_IMPORT_PREVIEW','PHONE_IMPORT_EXECUTE']);
  let busy=false,lastNoticeAt=0,publishing=false,devicePromise;
  let lastSyncError='',lastPublishedAt=0;
  /** Tác dụng: Tạo endpoint RPC điều khiển từ xa, kèm public anon key cho gateway. */
@@ -25,7 +25,7 @@
   feature={enabled:false,mode:'MANUAL',backupThreshold:10,...feature};
   const at=Date.now(),candidates=FsSwitch.plans(s,feature,at).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong snapshot. */ p=>({...p,identity:FsSwitch.identity(p)}));
   const dashboard={nodeDisplay:s.nodeDisplay,collectionEvening:s.collectionEvening,importantFailures:s.importantFailures,fsSwitchOperation:feature.operation,monitoringEnabled:s.monitoringEnabled,autoEnabled:s.autoEnabled,autoBlockMode:s.autoBlockMode,config:s.config,opensips:s.opensips,pendingAutoActions:s.pendingAutoActions,alerts:s.alerts,processingStatus:s.processingStatus,schedule:s.schedule,fsSwitchEnabled:feature.enabled,freeswitch:{nodeMappings:s.freeswitch?.nodeMappings,displayNumbers:s.freeswitch?.displayNumbers,backupCounts:s.freeswitch?.backupCounts,updatedAt:s.freeswitch?.updatedAt,numbers:(s.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong snapshot. */ n=>n.status==='ACTIVE').map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong snapshot. */ n=>({fs:n.fs,profile:n.profile,phone:n.phone,status:n.status,hasStatusControl:n.hasStatusControl}))},fsStates:Object.fromEntries(Object.entries(s.fsStates||{}).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong snapshot. */ ([key,f])=>[key,{...f,history:[],cdrUsedCallIds:undefined,cdr:f.cdr?{...f.cdr,traffic:undefined,records:(f.cdr.records||[]).slice(0,3)}:null}])),cdrWarnings:(s.cdrWarnings||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong snapshot. */ w=>at-w.at<15000),events:[]};
-  return {capturedAt:at,dashboard,monitoring:s.monitoringEnabled,auto:s.autoEnabled,blockMode:s.autoBlockMode,feature:{enabled:feature.enabled,mode:feature.mode,backupThreshold:feature.backupThreshold,displayNodes:feature.displayNodes,nextSwitch:feature.nextSwitch,operation:feature.operation,history:[]},pending:s.pendingAutoActions||[],candidates,
+  return {capabilities:{phoneImport:typeof PhoneImportWorker!=='undefined',phoneImportBoth:typeof PhoneImportWorker!=='undefined'},capturedAt:at,dashboard,monitoring:s.monitoringEnabled,auto:s.autoEnabled,blockMode:s.autoBlockMode,feature:{enabled:feature.enabled,mode:feature.mode,backupThreshold:feature.backupThreshold,displayNodes:feature.displayNodes,nextSwitch:feature.nextSwitch,operation:feature.operation,history:[]},pending:s.pendingAutoActions||[],candidates,
    fs:Object.values(s.fsStates||{}).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong snapshot. */ f=>Detection.isNodeSelected(s,f)&&(f.fs==='OS01'||Number(f.fs?.slice(2))<=7)).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong snapshot. */ f=>({fs:f.fs,key:f.key,group:f.group,groupId:f.groupId,vt:f.currentVt,state:f.state,baseline:f.baseline,drop:f.dropPercent,cdrCount:f.cdr?.decision?.count,records:(f.cdr?.records||[]).slice(0,3).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong snapshot. */ r=>`${r.sipCode}-${r.setupTime}-${r.duration}`),backups:s.freeswitch?.backupCounts?.[f.fs]?.count,incidentId:f.incident?.id})),
    schedule:s.schedule?.groups||{},alerts:s.alerts||[],warnings:(s.cdrWarnings||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong snapshot. */ w=>at-w.at<15000),events:(s.events||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong snapshot. */ e=>['AUTO_BLOCKED','MANUAL_SWITCH','BLOCKED_OBSERVED','FS_TRANSFERRED','FS_ENABLED','FS_DISABLED'].includes(e.type)&&at-e.at<30000).slice(0,8)};
  }
@@ -34,7 +34,7 @@
   const ack=bridge.ack;if(!ack)return;
   const response=await fetch(remoteUrl(),{method:'POST',headers:{apikey:config.anonKey,Authorization:'Bearer '+config.anonKey,'Content-Type':'application/json'},body:JSON.stringify({p_token:config.historyToken,p_action:'complete',p_payload:{...ack,device:bridge.device}}),signal:AbortSignal.timeout(30000)});
   if(!response.ok)await syncError(response);
-  request({action:'result-notify',device:bridge.device,id:ack.id}).catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong complete. */ ()=>{});
+  if(!ack.label?.startsWith('PHONE_IMPORT_'))request({action:'result-notify',device:bridge.device,id:ack.id}).catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong complete. */ ()=>{});
   delete bridge.ack;
  }
  /** Tác dụng: Chỉ chuyển các lệnh remote được cho phép sang handler đã kiểm tra của dashboard. */
@@ -80,7 +80,7 @@
    else{
     bridge.inFlight=command;await chrome.storage.local.set({telegramBridge:bridge});
     const result=await dispatch(command.payload);
-    bridge.ack={id:command.id,label:command.payload.type,result:{ok:!!result?.ok,error:result?.error||null,fs:result?.fs,groupId:result?.groupId,deleted:result?.deleted,reloaded:result?.reloaded,nodePicker:result?.nodePicker}};delete bridge.inFlight;
+    bridge.ack={id:command.id,label:command.payload.type,result:{ok:!!result?.ok,error:result?.error||null,fs:result?.fs,groupId:result?.groupId,deleted:result?.deleted,reloaded:result?.reloaded,nodePicker:result?.nodePicker,phoneImport:result?.phoneImport}};delete bridge.inFlight;
    }
    await chrome.storage.local.set({telegramBridge:bridge});
    await complete(bridge);await chrome.storage.local.set({telegramBridge:bridge});

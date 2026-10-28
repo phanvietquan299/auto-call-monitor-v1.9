@@ -4,6 +4,7 @@
  const config=globalThis.MobileConfig;
  const historyCache=new Map();
  let commandPending=false,noticeTimer;
+ const commandJobs=[];let queueRunning=false,jobSequence=0;
  const notice=document.createElement('div');
  notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
  notice.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;max-width:90vw;padding:12px 18px;border-radius:12px;background:#243850;color:#fff;box-shadow:0 4px 20px #0006;font-size:14px;pointer-events:none';
@@ -45,20 +46,24 @@
    for(let offset=0;;offset+=500){const rows=await rpc('history',{start,end:start==null?null:start+86400000,offset});events.push(...rows);if(rows.length<500)break;}
    const result={ok:true,events,sync:{source:'SUPABASE'}};historyCache.clear();if(events.length<=1000)historyCache.set(message.date||'',{at:Date.now(),result});return result;
   }
-  if(commandPending)return {ok:false,error:'Đang xử lý lệnh trước, vui lòng chờ kết quả.'};
-  commandPending=true;commandNotice('Đang gửi yêu cầu tới máy tính…');
+  return enqueueCommand(message);
+ }
+ /** Send one command at a time; unrelated UI operations can join the local queue. */
+ async function executeRemote(message,report){
   try{
    const live=cached&&Date.now()-lastRead<5000?cached:await state();
-   if(!live?.online){commandPending=false;commandNotice('Máy offline. Mở Chrome và extension trên máy.');return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};}
-   const queued=await rpc('command',{id:crypto.randomUUID(),command:message});
-   commandNotice('Đã gửi · đang chờ máy tính xử lý…');
+   if(!live?.online){report('Máy offline. Mở Chrome và extension trên máy.');return {ok:false,error:'Máy offline. Mở Chrome và extension trên máy.'};}
+   if(message.type?.startsWith('PHONE_IMPORT_')&&live.snapshot?.capabilities?.phoneImport!==true)return {ok:false,error:'Cần cập nhật và reload extension trên máy nguồn để nạp Excel.'};
+   if(message.type==='PHONE_IMPORT_PREVIEW'&&message.selectedSheet==='both'&&live.snapshot?.capabilities?.phoneImportBoth!==true)return {ok:false,error:'Cần cập nhật và reload extension 1.17.43 trên máy nguồn để chọn cả COLL và TLS.'};
+   const queued=await rpc('command',{id:message.type?.startsWith('PHONE_IMPORT_')?message.requestId||crypto.randomUUID():crypto.randomUUID(),command:message});
+   report('Đã gửi · đang chờ máy tính xử lý…');
    const deadline=Date.now()+120000;
    do{
     const result=await rpc('result',{id:queued.id});
     if(result.status==='DONE'){
      historyCache.clear();lastRead=0;
      const r=result.result||{ok:false,error:'Chưa có kết quả'};
-     commandPending=false;commandNotice(r.ok?'Đã thực hiện · đang cập nhật dữ liệu':r.error||'Thao tác không thành công');
+     report(r.ok?'Đã thực hiện · đang cập nhật dữ liệu':r.error||'Thao tác không thành công');
      if(r.nodePicker&&cached?.snapshot?.dashboard){
       const dashboard=cached.snapshot.dashboard,picker=r.nodePicker;
       dashboard.nodeDisplay=picker.nodeDisplay;
@@ -67,19 +72,59 @@
      state().catch(/** Tác dụng: Bỏ qua lỗi phụ của bước này để không ngắt luồng chính trong sendMessage. */ ()=>{});
      return {...r,state:cached?.snapshot?.dashboard};
     }
-    if(result.status==='RUNNING')commandNotice('Máy tính đang thực hiện thao tác…');
+    if(result.status==='RUNNING')report('Máy tính đang thực hiện thao tác…','RUNNING');
     if(result.status==='EXPIRED'||result.status==='CANCELLED'){
-     commandPending=false;commandNotice('Yêu cầu đã hết hạn; chưa thực hiện.');
+     report('Yêu cầu đã hết hạn; chưa thực hiện.');
      return {ok:false,error:'Yêu cầu đã hết hạn; chưa thực hiện.'};
     }
     await pause(500);
    }while(Date.now()<deadline);
-   commandPending=false;commandNotice('Chưa có kết quả. Kiểm tra trạng thái trước khi bấm lại.');
+   report('Chưa có kết quả. Kiểm tra trạng thái trước khi bấm lại.');
    return {ok:false,error:'Chưa nhận được kết quả. Kiểm tra trạng thái trước khi thực hiện lại.'};
-  }catch(error){commandPending=false;commandNotice(error.message);throw error;}
-  finally{commandPending=false;}
-
+  }catch(error){report(error.message);throw error;}
  }
+ function commandLabel(message){
+  const labels={SET_MONITORING:'Monitor',SET_AUTO:'AUTO',SET_AUTO_BLOCK_MODE:'Chế độ đổi số',MANUAL_FS_STATUS:'Trạng thái số',FS_SWITCH_TOGGLE_NODE:'Bật/tắt FS',FS_SWITCH_RELOAD:'Reload OpenSIPS',PHONE_IMPORT_PREVIEW:'Kiểm tra Excel',PHONE_IMPORT_EXECUTE:'Nạp số',CONFIRM_AUTO_BLOCK:'Xác nhận đổi số',FS_SWITCH_SETTINGS:'Cấu hình FS',FS_SWITCH_CONFIRM:'Thay FS',FS_SWITCH_PRESET:'Đặt trước FS',CLEAR_HISTORY:'Xóa lịch sử'};
+  return `${labels[message.type]||'Thao tác'}${message.fs?' · '+message.fs:message.group?' · '+(message.group==='99.153'?'Collection':'Sale'):''}`;
+ }
+ function renderCommandQueue(){
+  const active=commandJobs.filter(job=>!job.finished),panel=document.getElementById('mobile-command-queue'),list=document.getElementById('mobile-command-items');
+  const counter=document.getElementById('mobile-command-count');if(counter)counter.textContent=active.length?`${active.length} yêu cầu đang chờ/xử lý`:'Đã xử lý xong';
+  if(!panel||!list?.replaceChildren)return;panel.hidden=commandJobs.length===0;list.replaceChildren();
+  const visible=[...commandJobs.filter(job=>!job.finished),...commandJobs.filter(job=>job.finished).slice(-4)].sort((a,b)=>a.sequence-b.sequence);
+  for(const job of visible){
+   const row=document.createElement('div'),name=document.createElement('b'),status=document.createElement('span'),detail=document.createElement('div');
+   row.className='mobile-command-entry';name.textContent=`#${job.sequence} · ${job.label}`;
+   status.textContent=job.finished?(job.result?.ok?'Hoàn tất':'Chưa hoàn tất'):job.phase==='WAITING'?'Chờ gửi':job.phase==='RUNNING'?'Đang thực hiện':'Đã gửi · chờ máy';
+   status.className=job.finished?(job.result?.ok?'good':'bad'):'watching';detail.textContent=job.detail;detail.className='muted';row.appendChild(name);row.appendChild(status);row.appendChild(detail);list.appendChild(row);
+  }
+ }
+ function enqueueCommand(message){
+  const key=JSON.stringify({...message,requestId:undefined}),existing=commandJobs.find(job=>!job.finished&&job.key===key);
+  if(existing)return existing.promise;
+  if(commandJobs.filter(job=>!job.finished).length>=10){const error='Đã có 10 yêu cầu chờ; đợi bớt thao tác trước khi gửi thêm.';commandNotice(error);return Promise.resolve({ok:false,error});}
+  const job={sequence:++jobSequence,key,message,owner:session,createdAt:Date.now(),label:commandLabel(message),phase:'WAITING',detail:'Chờ thao tác trước hoàn tất',finished:false};
+  job.promise=new Promise(resolve=>{job.resolve=resolve;});commandJobs.push(job);commandPending=true;renderCommandQueue();if(queueRunning)commandNotice(`${job.label}: đã xếp hàng, chờ thao tác trước.`);pumpCommands();return job.promise;
+ }
+ async function pumpCommands(){
+  if(queueRunning)return;queueRunning=true;
+  try{
+   for(const job of commandJobs.filter(job=>!job.finished)){
+    job.phase='SENDING';job.detail='Đang gửi yêu cầu tới máy tính…';commandNotice(`${job.label}: ${job.detail}`);renderCommandQueue();
+    try{
+     if(!session||job.owner!==session)job.result={ok:false,error:'Phiên đăng nhập đã thay đổi; yêu cầu chưa gửi đã được hủy.'};
+     else if(Date.now()-job.createdAt>90000)job.result={ok:false,error:'Yêu cầu chờ quá 90 giây, chưa được gửi; kiểm tra trạng thái rồi thực hiện lại.'};
+     else job.result=await executeRemote(job.message,(text,phase)=>{job.detail=text;if(phase)job.phase=phase;commandNotice(text);renderCommandQueue();});
+    }catch(error){job.result={ok:false,error:String(error.message||error)};}
+    job.finished=true;job.detail=job.result?.ok?'Đã thực hiện':job.result?.error||'Chưa có kết quả';renderCommandQueue();job.resolve(job.result);
+   }
+  }finally{
+   queueRunning=false;commandPending=commandJobs.some(job=>!job.finished);
+   if(commandPending)pumpCommands();else commandNotice(commandJobs.at(-1)?.detail||'Đã xử lý xong');
+   while(commandJobs.length>20&&commandJobs[0].finished)commandJobs.shift();
+  }
+ }
+
  globalThis.chrome={runtime:{sendMessage}};
  /** Tác dụng: Đọc snapshot định kỳ khi app đang hiển thị và đã có phiên đăng nhập. */
  async function poll(){await initial;if(document.visibilityState!=='hidden'&&session)await state();setTimeout(poll,1000);}

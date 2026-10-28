@@ -17,13 +17,13 @@ begin
   if fresh and runtime.device<>p_payload->>'device' then raise exception 'Another extension is connected';end if;
   insert into call_monitor_private.remote_runtime(id,device,at,snapshot) values(true,p_payload->>'device',now_ms,p_payload->'snapshot') on conflict(id) do update set device=excluded.device,at=excluded.at,snapshot=case when coalesce((excluded.snapshot->>'capturedAt')::bigint,0)>=coalesce((call_monitor_private.remote_runtime.snapshot->>'capturedAt')::bigint,0) then excluded.snapshot else call_monitor_private.remote_runtime.snapshot end;
   if p_action='publish' then return '{}'::jsonb;end if;
-  update call_monitor_private.remote_commands set status='EXPIRED' where status in ('PREVIEW','QUEUED') and now_ms-created_at>90000;
+  update call_monitor_private.remote_commands set status='EXPIRED',payload=case when payload->>'type'='PHONE_IMPORT_PREVIEW' then payload-'entries' else payload end where status in ('PREVIEW','QUEUED') and now_ms-created_at>90000;
   select * into command from call_monitor_private.remote_commands where status='QUEUED' order by created_at for update skip locked limit 1;
   if command.id is not null then update call_monitor_private.remote_commands set status='RUNNING',claimed_by=p_payload->>'device' where id=command.id;return to_jsonb(command);end if;
   return 'null'::jsonb;
  elsif p_action='claim' then
   if not fresh or runtime.device<>p_payload->>'device' then raise exception 'Máy chưa đồng bộ dữ liệu; chờ kết nối';end if;
-  update call_monitor_private.remote_commands set status='EXPIRED' where status in ('PREVIEW','QUEUED') and now_ms-created_at>90000;
+  update call_monitor_private.remote_commands set status='EXPIRED',payload=case when payload->>'type'='PHONE_IMPORT_PREVIEW' then payload-'entries' else payload end where status in ('PREVIEW','QUEUED') and now_ms-created_at>90000;
   select * into command from call_monitor_private.remote_commands where status='QUEUED' order by created_at for update skip locked limit 1;
   if command.id is not null then update call_monitor_private.remote_commands set status='RUNNING',claimed_by=p_payload->>'device' where id=command.id;return to_jsonb(command);end if;
   return 'null'::jsonb;
@@ -39,7 +39,7 @@ begin
  elsif p_action='cancel' then
   update call_monitor_private.remote_commands set status='CANCELLED' where id=(p_payload->>'id')::uuid and status='PREVIEW';return '{}'::jsonb;
  elsif p_action='complete' then
-  update call_monitor_private.remote_commands set status='DONE',result=p_payload->'result' where id=(p_payload->>'id')::uuid and status='RUNNING' and claimed_by=p_payload->>'device';get diagnostics count_changed=row_count;
+  update call_monitor_private.remote_commands set status='DONE',result=p_payload->'result',payload=case when payload->>'type'='PHONE_IMPORT_PREVIEW' then payload-'entries' else payload end where id=(p_payload->>'id')::uuid and status='RUNNING' and claimed_by=p_payload->>'device';get diagnostics count_changed=row_count;
   return jsonb_build_object('accepted',count_changed=1);
  elsif p_action='command-result' then
   select * into command from call_monitor_private.remote_commands where id=(p_payload->>'id')::uuid and status='DONE' and claimed_by=p_payload->>'device';return to_jsonb(command);

@@ -263,10 +263,11 @@
   function hybridObservationState(s,f,now,e){
     if(!s.config?.cdrRequireVtDrop)return e?'HEALTHY':'WAITING_CDR';
     if(!Number.isFinite(f.currentVt)||now-f.updatedAt<0||now-f.updatedAt>s.config.staleMs){f.detectionNote='Chờ VT mới; chưa đánh giá kết hợp';return 'WAITING_VT';}
-    if(!Number.isFinite(f.baseline)||f.baseline<=0){f.detectionNote='Đang học baseline VT trước khi đánh giá kết hợp';return 'LEARNING';}
+    const fallbackNote=e?.locked&&f.cdrFailureRun?.count?`CDR dự phòng: ${f.cdrFailureRun.count}/3 lượt Search liên tiếp lỗi 5/5; đủ 3 lượt sẽ xử lý không phụ thuộc VT`:null;
+    if(!Number.isFinite(f.baseline)||f.baseline<=0){f.detectionNote=fallbackNote||'Đang học baseline VT trước khi đánh giá kết hợp';return 'LEARNING';}
     const ratio=f.currentVt/f.baseline;
-    if(ratio<=s.config.warningRatio){f.detectionNote=e?'VT giảm mạnh; CDR chưa đủ 5/5 để kết luận nghi block':'VT giảm mạnh; chờ CDR mới để xác minh';return 'WARNING';}
-    if(e?.locked){f.detectionNote='CDR đã đủ 5/5 nhưng VT chưa tới ngưỡng; tiếp tục theo dõi';return 'WARNING';}
+    if(ratio<=s.config.warningRatio){f.detectionNote=fallbackNote||(e?'VT giảm mạnh; CDR chưa đủ 5/5 để kết luận nghi block':'VT giảm mạnh; chờ CDR mới để xác minh');return 'WARNING';}
+    if(e?.locked){f.detectionNote=fallbackNote||'CDR đã đủ 5/5 nhưng VT chưa tới ngưỡng; tiếp tục theo dõi';return 'WARNING';}
     if(ratio<=s.config.watchRatio){f.detectionNote='VT đang giảm; theo dõi kết hợp CDR';return 'WATCHING';}
     if(!e){f.detectionNote='VT chưa giảm mạnh; chờ CDR mới để xác minh';return 'WAITING_CDR';}
     f.detectionNote=null;return 'HEALTHY';
@@ -308,8 +309,10 @@
     const {e,phone,after}=proof;
     let run=f[key];
     if(!run||run.phone!==phone||run.after!==after)run=f[key]={phone,after,count:0,checkedAt:0};
-    if(!proof.bad){run.count=0;run.checkedAt=e?.checkedAt||0;}
-    else if(e.checkedAt>run.checkedAt){
+    // A stale re-render is not a new Search result. Keep the sequence, but
+    // cdrGate still requires a fresh 5/5 response before authorizing any write.
+    if(!proof.available||e?.checkedAt!==run.checkedAt&&!proof.bad){run.count=0;run.checkedAt=e?.checkedAt||0;}
+    else if(proof.bad&&e.checkedAt>run.checkedAt){
       const gap=e.checkedAt-run.checkedAt;
       if(!run.checkedAt||gap>15000){run.count=1;run.firstAt=e.checkedAt;run.checkedAt=e.checkedAt;}
       else if(os01CdrPolicy(f)||gap>=2000){run.count=Math.min(limit,run.count+1);run.checkedAt=e.checkedAt;}

@@ -50,7 +50,11 @@ begin
  if p_action='state' then return jsonb_build_object('online',runtime.at is not null and t-runtime.at<45000,'at',runtime.at,'snapshot',runtime.snapshot);
  elsif p_action='command' then
   if runtime.at is null or t-runtime.at>=45000 then raise exception 'Máy đang offline';end if;
-  if not coalesce(p_payload->'command'->>'type'=any(array['MANUAL_FS_STATUS','DISMISS_CDR_WARNING','SET_MONITORING','SET_AUTO','SET_AUTO_BLOCK_MODE','CONFIRM_AUTO_BLOCK','CANCEL_AUTO_BLOCK','RECHECK_AUTO_BLOCK','ACK_MANUAL_AFTER_FAILURE','REPORT_MANUAL_SWAP','CLEAR_HISTORY','FS_SWITCH_SETTINGS','FS_SWITCH_THRESHOLD','FS_SWITCH_PRESET','FS_SWITCH_RELOAD','FS_SWITCH_TOGGLE_NODE','FS_SWITCH_CONFIRM','FS_SWITCH_RELEASE']),false) then raise exception 'Lệnh không hợp lệ';end if;
+  if not coalesce(p_payload->'command'->>'type'=any(array['MANUAL_FS_STATUS','DISMISS_CDR_WARNING','SET_MONITORING','SET_AUTO','SET_AUTO_BLOCK_MODE','CONFIRM_AUTO_BLOCK','CANCEL_AUTO_BLOCK','RECHECK_AUTO_BLOCK','ACK_MANUAL_AFTER_FAILURE','REPORT_MANUAL_SWAP','CLEAR_HISTORY','FS_SWITCH_SETTINGS','FS_SWITCH_THRESHOLD','FS_SWITCH_PRESET','FS_SWITCH_RELOAD','FS_SWITCH_TOGGLE_NODE','FS_SWITCH_CONFIRM','FS_SWITCH_RELEASE','PHONE_IMPORT_PREVIEW','PHONE_IMPORT_EXECUTE']),false) then raise exception 'Lệnh không hợp lệ';end if;
+  if p_payload->'command'->>'type'='PHONE_IMPORT_PREVIEW' then
+   if not coalesce(p_payload->'command'->>'selectedSheet'=any(array['coll','tls','both']),false) or jsonb_typeof(p_payload->'command'->'entries') is distinct from 'array' then raise exception 'Danh sách nạp không hợp lệ';end if;
+   if jsonb_array_length(p_payload->'command'->'entries') not between 1 and 10000 or octet_length((p_payload->'command')::text)>300000 then raise exception 'Danh sách nạp quá lớn';end if;
+  end if;
   insert into call_monitor_private.remote_commands(dedupe,payload,status,created_at) values('mobile:'||(p_payload->>'id'),p_payload->'command','QUEUED',t) on conflict(dedupe) do nothing;
   select * into command from call_monitor_private.remote_commands where dedupe='mobile:'||(p_payload->>'id');return jsonb_build_object('id',command.id,'status',command.status);
  elsif p_action='result' then
