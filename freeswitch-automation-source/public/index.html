@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FreeSWITCH Automation Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- LIBS DÀNH CHO CHART.JS VÀ XUẤT PDF -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    .table-responsive {
+      -webkit-overflow-scrolling: touch;
+    }
+    th, td {
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans min-h-screen flex flex-col">
+
+  <!-- TOPNAV: BỎ STICKY ĐỂ TRÁNH CHE MẤT BẢNG NODE TRÊN ĐIỆN THOẠI -->
+  <nav class="bg-slate-900 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-3 py-2.5 flex flex-wrap justify-between items-center gap-2">
+      <!-- LOGO -->
+      <div class="flex items-center space-x-2">
+        <i class="fas fa-network-wired text-cyan-400 text-xl"></i>
+        <span class="font-bold text-base md:text-xl tracking-wide">FS Automation</span>
+      </div>
+
+      <!-- TABS & ACTIONS -->
+      <div class="flex items-center space-x-2 md:space-x-4">
+        <div id="nav-tabs" class="hidden flex space-x-1 md:space-x-2">
+          <button onclick="switchTab('nodes')" id="tab-nodes" class="px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center">
+            <i class="fas fa-server mr-1"></i> <span class="hidden sm:inline">Quản Lý </span>Node & Số
+          </button>
+          <button onclick="switchTab('report')" id="tab-report" class="px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center">
+            <i class="fas fa-chart-pie mr-1"></i> Báo Cáo
+          </button>
+        </div>
+
+        <div id="auth-info" class="hidden flex items-center space-x-2">
+          <span class="hidden md:inline text-xs bg-slate-700 px-2.5 py-1 rounded-full text-slate-200" id="user-display"><i class="fas fa-user mr-1"></i> Admin</span>
+          <button onclick="logout()" class="text-xs bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-2.5 rounded-lg transition flex items-center">
+            <i class="fas fa-sign-out-alt md:mr-1"></i><span class="hidden md:inline">Đăng xuất</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-7xl mx-auto px-2 sm:px-4 py-4 md:py-6 flex-1 w-full">
+
+    <!-- FORM ĐĂNG NHẬP -->
+    <div id="login-section" class="max-w-md mx-auto mt-10 md:mt-16 bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-200">
+      <h2 class="text-xl md:text-2xl font-bold text-center text-slate-800 mb-6"><i class="fas fa-lock mr-2 text-cyan-600"></i> Đăng Nhập Hệ Thống</h2>
+      <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Tài khoản</label>
+          <input type="text" id="login-username" required class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Mật khẩu</label>
+          <input type="password" id="login-password" required class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
+        </div>
+        <div id="login-error" class="text-red-500 text-xs hidden font-semibold"></div>
+        <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 rounded-lg transition text-sm">
+          Đăng Nhập
+        </button>
+      </form>
+    </div>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <div id="dashboard-section" class="hidden space-y-5 md:space-y-6">
+
+      <!-- TAB 1: NODES & NUMBERS -->
+      <div id="section-nodes" class="space-y-5 md:space-y-6">
+
+        <!-- CARD 1: DANH SÁCH NODE -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div class="bg-slate-50 px-4 py-3 md:px-6 md:py-4 border-b border-gray-200 flex justify-between items-center gap-2">
+            <h3 class="font-bold text-slate-800 flex items-center text-sm md:text-base">
+              <i class="fas fa-sitemap mr-2 text-cyan-600"></i> Danh Sách Node FreeSWITCH
+            </h3>
+            <div class="flex items-center space-x-1.5 md:space-x-2">
+              <button onclick="openConfigModal('DEFAULT')" class="bg-slate-800 hover:bg-slate-900 text-amber-300 font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition border border-slate-700 flex items-center">
+                <i class="fas fa-sliders-h mr-1 text-amber-400"></i> <span class="hidden sm:inline">Ngưỡng </span>Default
+              </button>
+              <button onclick="openAddNodeModal()" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center">
+                <i class="fas fa-plus mr-1"></i> Thêm Node
+              </button>
+            </div>
+          </div>
+
+          <!-- BẢNG CUỘN NGANG TỰ NHIÊN, KHÔNG ĐÈ CHỮ -->
+          <div class="overflow-x-auto table-responsive">
+            <table class="w-full text-xs md:text-sm text-left min-w-[700px]">
+              <thead class="bg-slate-100 text-slate-700 uppercase text-[11px] md:text-xs">
+                <tr>
+                  <th class="py-2.5 px-3 md:px-4">Node ID</th>
+                  <th class="py-2.5 px-3 md:px-4">IP Host</th>
+                  <th class="py-2.5 px-2 text-center">Profile</th>
+                  <th class="py-2.5 px-2 text-center">ESL</th>
+                  <th class="py-2.5 px-2 text-center">Active</th>
+                  <th class="py-2.5 px-2 text-center">Backup</th>
+                  <th class="py-2.5 px-2 text-center">Blocked</th>
+                  <th class="py-2.5 px-2 text-center">Tổng</th>
+                  <th class="py-2.5 px-2 text-center">Manage</th>
+                  <th class="py-2.5 px-3 md:px-4 text-center">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="nodes-tbody" class="divide-y divide-gray-200"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CARD 2: QUẢN LÝ KHO SỐ DỰ PHÒNG -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div class="bg-slate-50 px-4 py-3 md:px-6 md:py-4 border-b border-gray-200 flex justify-between items-center gap-2">
+            <h3 class="font-bold text-slate-800 flex items-center text-sm md:text-base">
+              <i class="fas fa-phone-alt mr-2 text-cyan-600"></i> Quản Lý Kho Số Điện Thoại
+            </h3>
+            <div class="flex items-center space-x-1.5 md:space-x-2">
+              <button onclick="openUploadExcelModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center">
+                <i class="fas fa-file-excel mr-1"></i> Import
+              </button>
+              <button onclick="openAddNumbersModal()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center">
+                <i class="fas fa-plus mr-1"></i> Nạp Số
+              </button>
+            </div>
+          </div>
+
+          <div class="p-3 md:p-4">
+            <!-- TOOLBAR GỌN GÀNG CHO MÀN HÌNH NHỎ -->
+            <div class="space-y-2 mb-3">
+              <div class="grid grid-cols-2 gap-2">
+                <div class="relative">
+                  <i class="fas fa-search absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
+                  <input type="text" id="search-phone" oninput="filterNumbers()" placeholder="Tìm SĐT..." class="pl-7 pr-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-500 w-full bg-white">
+                </div>
+                <select id="filter-node" onchange="filterNumbers()" class="border rounded-lg px-2 py-1.5 text-xs bg-white w-full">
+                  <option value="ALL">Tất cả Node</option>
+                </select>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <select id="filter-status" onchange="filterNumbers()" class="border rounded-lg px-2 py-1.5 text-xs bg-white w-full">
+                  <option value="ALL">Tất cả Trạng thái</option>
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="BACKUP">BACKUP</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                </select>
+                <button onclick="bulkDeleteNumbers()" class="text-xs bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-bold py-1.5 px-2 rounded-lg transition flex items-center justify-center">
+                  <i class="fas fa-trash-alt mr-1"></i>Xóa theo lọc
+                </button>
+              </div>
+            </div>
+
+            <!-- BẢNG SỐ ĐIỆN THOẠI -->
+            <div class="overflow-x-auto table-responsive">
+              <table class="w-full text-xs md:text-sm text-left min-w-[550px]">
+                <thead class="bg-slate-100 text-slate-700 uppercase text-[11px]">
+                  <tr>
+                    <th class="py-2.5 pl-3 pr-1">Số Điện Thoại</th>
+                    <th class="py-2.5 px-1.5 text-center">Node</th>
+                    <th class="py-2.5 px-2 text-center hidden sm:table-cell">Profile</th>
+                    <th class="py-2.5 px-1.5 text-center">Trạng Thái</th>
+                    <th class="py-2.5 px-1.5 text-center">Tác Vụ</th>
+                    <th class="py-2.5 px-2 text-center">Xóa</th>
+                  </tr>
+                </thead>
+                <tbody id="numbers-tbody" class="divide-y divide-gray-200"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- TAB 2: BÁO CÁO REPORT -->
+      <div id="section-report" class="hidden space-y-5 md:space-y-6">
+
+        <!-- TOOLBAR XUẤT REPORT -->
+        <div class="bg-white p-3 md:p-4 rounded-xl shadow border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+          <div class="flex items-center space-x-2">
+            <i class="fas fa-calendar-alt text-cyan-600 text-base md:text-lg"></i>
+            <span class="font-bold text-slate-800 text-xs md:text-sm">Thời gian báo cáo:</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs w-full md:w-auto">
+            <input type="date" id="report-from-date" onchange="loadReports()" class="border rounded-lg px-2 py-1.5 bg-white font-semibold flex-1 sm:flex-initial">
+            <input type="date" id="report-to-date" onchange="loadReports()" class="border rounded-lg px-2 py-1.5 bg-white font-semibold flex-1 sm:flex-initial">
+            <button onclick="resetReportDateFilter()" class="bg-gray-200 hover:bg-gray-300 px-2.5 py-1.5 rounded-lg font-bold text-gray-700 transition">
+              <i class="fas fa-redo-alt"></i>
+            </button>
+
+            <button onclick="exportReportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition flex items-center">
+              <i class="fas fa-file-excel mr-1"></i> Excel
+            </button>
+            <button onclick="exportReportPDF()" class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition flex items-center">
+              <i class="fas fa-file-pdf mr-1"></i> PDF
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI SUMMARY CARDS -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center space-x-3">
+            <div class="bg-slate-100 text-slate-700 p-2.5 md:p-3 rounded-full"><i class="fas fa-list-ol text-lg md:text-xl"></i></div>
+            <div>
+              <div class="text-[11px] font-semibold text-gray-500 uppercase">Tổng Số</div>
+              <div class="text-lg md:text-2xl font-extrabold text-slate-800" id="rpt-total-num">0</div>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center space-x-3">
+            <div class="bg-emerald-100 text-emerald-600 p-2.5 md:p-3 rounded-full"><i class="fas fa-phone-volume text-lg md:text-xl"></i></div>
+            <div>
+              <div class="text-[11px] font-semibold text-gray-500 uppercase">Active</div>
+              <div class="text-lg md:text-2xl font-extrabold text-emerald-600" id="rpt-active-num">0</div>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center space-x-3">
+            <div class="bg-cyan-100 text-cyan-600 p-2.5 md:p-3 rounded-full"><i class="fas fa-layer-group text-lg md:text-xl"></i></div>
+            <div>
+              <div class="text-[11px] font-semibold text-gray-500 uppercase">Backup</div>
+              <div class="text-lg md:text-2xl font-extrabold text-cyan-600" id="rpt-backup-num">0</div>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center space-x-3">
+            <div class="bg-rose-100 text-rose-600 p-2.5 md:p-3 rounded-full"><i class="fas fa-ban text-lg md:text-xl"></i></div>
+            <div>
+              <div class="text-[11px] font-semibold text-gray-500 uppercase">Blocked</div>
+              <div class="text-lg md:text-2xl font-extrabold text-rose-600" id="rpt-blocked-num">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- THỐNG KÊ BIỂU ĐỒ TRÒN -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          <div class="bg-white p-4 md:p-5 rounded-xl border border-gray-200 shadow-sm">
+            <h4 class="font-bold text-slate-800 mb-3 text-center text-xs md:text-sm uppercase tracking-wider">
+              <i class="fas fa-chart-pie mr-1 text-cyan-600"></i> Tỷ Lệ Kho Số
+            </h4>
+            <div class="h-56 md:h-64 flex justify-center items-center">
+              <canvas id="statusPieChart"></canvas>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 md:p-5 rounded-xl border border-gray-200 shadow-sm">
+            <h4 class="font-bold text-slate-800 mb-3 text-center text-xs md:text-sm uppercase tracking-wider">
+              <i class="fas fa-chart-pie mr-1 text-emerald-600"></i> Phân Bố Theo Profile
+            </h4>
+            <div class="h-56 md:h-64 flex justify-center items-center">
+              <canvas id="profilePieChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- BÁO CÁO PROFILE -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div class="bg-slate-50 px-4 py-3 border-b border-gray-200">
+            <h3 class="font-bold text-slate-800 text-xs md:text-sm uppercase">Thống Kê Theo Profile</h3>
+          </div>
+          <div class="overflow-x-auto table-responsive">
+            <table class="w-full text-xs md:text-sm text-left">
+              <thead class="bg-slate-100 text-slate-700 uppercase text-xs">
+                <tr>
+                  <th class="py-2.5 px-3">Profile</th>
+                  <th class="py-2.5 px-3 text-center">Tổng</th>
+                  <th class="py-2.5 px-3 text-center">Active</th>
+                  <th class="py-2.5 px-3 text-center">Backup</th>
+                  <th class="py-2.5 px-3 text-center">Blocked</th>
+                  <th class="py-2.5 px-3 text-center">Tỷ Lệ Backup</th>
+                  <th class="py-2.5 px-3 text-center">Khả Dụng</th>
+                </tr>
+              </thead>
+              <tbody id="report-profile-tbody" class="divide-y divide-gray-200"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CẢNH BÁO NODE BACKUP -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div class="bg-slate-50 px-4 py-3 border-b border-gray-200">
+            <h3 class="font-bold text-slate-800 text-xs md:text-sm uppercase flex items-center">
+              <i class="fas fa-exclamation-triangle mr-2 text-amber-500"></i> Trạng Thái Backup Từng Node
+            </h3>
+          </div>
+          <div class="overflow-x-auto table-responsive">
+            <table class="w-full text-xs md:text-sm text-left">
+              <thead class="bg-slate-100 text-slate-700 uppercase text-xs">
+                <tr>
+                  <th class="py-2.5 px-3">Node</th>
+                  <th class="py-2.5 px-3 text-center">Profile</th>
+                  <th class="py-2.5 px-3 text-center">Active</th>
+                  <th class="py-2.5 px-3 text-center">Backup</th>
+                  <th class="py-2.5 px-3 text-center">Blocked</th>
+                  <th class="py-2.5 px-3 text-center">Tổng</th>
+                  <th class="py-2.5 px-3 text-center">Tỷ Lệ (%)</th>
+                  <th class="py-2.5 px-3 text-center">Đánh Giá</th>
+                </tr>
+              </thead>
+              <tbody id="report-node-tbody" class="divide-y divide-gray-200"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- LỊCH SỬ SWAP LOGS -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div class="bg-slate-50 px-4 py-3 border-b border-gray-200">
+            <h3 class="font-bold text-slate-800 text-xs md:text-sm uppercase flex items-center">
+              <i class="fas fa-history mr-2 text-cyan-600"></i> Lịch Sử Đổi Đầu Số
+            </h3>
+          </div>
+          <div class="overflow-x-auto table-responsive">
+            <table class="w-full text-xs md:text-sm text-left">
+              <thead class="bg-slate-100 text-slate-700 uppercase text-xs">
+                <tr>
+                  <th class="py-2.5 px-3">Thời Gian</th>
+                  <th class="py-2.5 px-3">Node</th>
+                  <th class="py-2.5 px-3">Số Bị Khóa</th>
+                  <th class="py-2.5 px-3">Số Kích Hoạt</th>
+                  <th class="py-2.5 px-3 text-center">Loại</th>
+                  <th class="py-2.5 px-3 text-center">Người Làm</th>
+                </tr>
+              </thead>
+              <tbody id="logs-tbody" class="divide-y divide-gray-200"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================== -->
+  <!-- MODALS -->
+  <!-- ========================================== -->
+
+  <!-- MODAL CẤU HÌNH NGƯỠNG AUTO-SWAP -->
+  <div id="modal-config-auto-swap" class="fixed inset-0 bg-slate-900/60 hidden flex items-center justify-center p-3 z-50">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 space-y-3.5 border border-gray-200 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b pb-2.5">
+        <h3 class="text-base md:text-lg font-bold text-slate-800 flex items-center">
+          <i class="fas fa-sliders-h mr-2 text-amber-500"></i> Ngưỡng Auto-Swap [<span id="cfg-display-node" class="text-cyan-600 ml-1">DEFAULT</span>]
+        </h3>
+        <button onclick="closeModal('modal-config-auto-swap')" class="text-gray-400 hover:text-gray-600 text-xl font-bold p-1">&times;</button>
+      </div>
+      
+      <p class="text-xs text-gray-500">Thiết lập điều kiện phát hiện số bị khóa/lỗi để tự động swap.</p>
+
+      <div class="space-y-3 text-xs md:text-sm">
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Số lỗi tối đa kích hoạt Swap (maxErrors)</label>
+          <input type="number" id="cfg-max-errors" min="1" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none">
+          <span class="text-[11px] text-gray-400">Ví dụ: 10, 20 hoặc 40 lỗi</span>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Cửa sổ trượt thời gian (timeWindowSec - Giây)</label>
+          <input type="number" id="cfg-time-window" min="1" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none">
+          <span class="text-[11px] text-gray-400">Ví dụ: 10s hoặc 15s</span>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Thời gian Setup tối đa (maxSetupTimeSec - Giây)</label>
+          <input type="number" id="cfg-setup-time" step="0.1" min="0.1" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none">
+          <span class="text-[11px] text-gray-400">Nhận diện rớt nhanh (0.5s hoặc 1.0s)</span>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Mã SIP theo dõi</label>
+          <div class="flex flex-wrap gap-3 pt-1">
+            <label class="inline-flex items-center text-xs font-semibold text-gray-700 cursor-pointer">
+              <input type="checkbox" id="cfg-sip-480" value="480" class="rounded text-cyan-600 mr-1.5 w-4 h-4"> SIP 480
+            </label>
+            <label class="inline-flex items-center text-xs font-semibold text-gray-700 cursor-pointer">
+              <input type="checkbox" id="cfg-sip-503" value="503" class="rounded text-cyan-600 mr-1.5 w-4 h-4"> SIP 503
+            </label>
+            <label class="inline-flex items-center text-xs font-semibold text-gray-700 cursor-pointer">
+              <input type="checkbox" id="cfg-sip-500" value="500" class="rounded text-cyan-600 mr-1.5 w-4 h-4"> SIP 500
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button onclick="closeModal('modal-config-auto-swap')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-lg text-xs">Hủy</button>
+        <button onclick="saveAutoSwapConfig()" id="btn-save-cfg" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs transition">Lưu Cấu Hình</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL THÊM NODE -->
+  <div id="modal-add-node" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-3 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-3 border max-h-[90vh] overflow-y-auto">
+      <h3 class="text-base font-bold text-slate-800">Thêm Node Mới (FS / OPS / KAMAILIO)</h3>
+      <div class="space-y-2.5">
+        
+        <!-- BỔ SUNG TRƯỜNG CHỌN LOẠI NODE -->
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">LOẠI NODE</label>
+          <select id="add-node-type" onchange="handleNodeTypeChange()" class="w-full border rounded-lg px-3 py-1.5 text-sm bg-white font-semibold text-cyan-700 outline-none focus:ring-1 focus:ring-cyan-500">
+            <option value="FS">FreeSWITCH</option>
+            <option value="OPENSIPS">OpenSIPS</option>
+            <option value="KAMAILIO">Kamailio</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">NODE ID (VD: FS11, OS02, KM01)</label>
+          <input type="text" id="add-node-id" class="w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-cyan-500">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">IP HOST</label>
+          <input type="text" id="add-node-host" class="w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-cyan-500">
+        </div>
+        
+        <!-- NHÃN PORT SẼ TỰ ĐỘNG THAY ĐỔI THEO LOẠI NODE -->
+        <div>
+          <label id="label-node-port" class="block text-xs font-bold text-gray-700 mb-1">ESL PORT (Mặc định: 8021)</label>
+          <input type="number" id="add-node-port" value="8021" class="w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-cyan-500">
+        </div>
+        
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">PROFILE</label>
+          <select id="add-node-profile" class="w-full border rounded-lg px-3 py-1.5 text-sm bg-white outline-none focus:ring-1 focus:ring-cyan-500">
+            <option value="COLLECTION">COLLECTION</option>
+            <option value="TELESALE">TELESALE</option>
+            <option value="CS + UW">CS + UW</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeModal('modal-add-node')" class="px-4 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-lg text-xs transition">Hủy</button>
+        <button onclick="submitAddNode()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg text-xs transition">Thêm Node</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NẠP SỐ THỦ CÔNG -->
+  <div id="modal-add-numbers" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-3 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-3 border max-h-[90vh] overflow-y-auto">
+      <h3 class="text-base font-bold text-slate-800">Nạp Đầu Số Dự Phòng Thủ Công</h3>
+      <div class="space-y-2.5">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">Chọn Node</label>
+          <select id="add-num-node" class="w-full border rounded-lg px-3 py-1.5 text-sm bg-white"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">Danh sách SĐT (Mỗi số 1 dòng)</label>
+          <textarea id="add-num-list" rows="5" placeholder="0988123456&#10;0977654321" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeModal('modal-add-numbers')" class="px-4 py-1.5 bg-gray-200 text-gray-700 font-bold rounded-lg text-xs">Hủy</button>
+        <button onclick="submitAddNumbers()" class="px-4 py-1.5 bg-cyan-600 text-white font-bold rounded-lg text-xs">Nạp Số</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL IMPORT EXCEL -->
+  <div id="modal-upload-excel" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-3 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-3 border max-h-[90vh] overflow-y-auto">
+      <h3 class="text-base font-bold text-slate-800">Import Số Tự Động Bằng Excel</h3>
+      <p class="text-xs text-gray-500">File Excel cần chứa các cột: <b>SĐT</b>, <b>Node</b>, và <b>Profile</b>.</p>
+      <div>
+        <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="w-full border rounded-lg px-3 py-2 text-xs">
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeModal('modal-upload-excel')" class="px-4 py-1.5 bg-gray-200 text-gray-700 font-bold rounded-lg text-xs">Hủy</button>
+        <button onclick="submitUploadExcel()" class="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg text-xs">Tải Lên</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC -->
+  <script>
+    const socket = io();
+    let currentNodes = [];
+    let currentNumbers = [];
+    let statusChartInstance = null;
+    let profileChartInstance = null;
+    let currentEditingNodeConfig = 'DEFAULT';
+
+    socket.on('node_health_updated', () => loadAllData());
+    socket.on('number_swapped', () => loadAllData());
+    socket.on('node_status_changed', () => loadAllData());
+    socket.on('node_config_updated', (data) => {
+      console.log('[CONFIG] Nhận socket cập nhật cấu hình Node:', data);
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      checkAuth();
+    });
+
+    async function checkAuth() {
+      const res = await fetch('/api/check-auth');
+      const data = await res.json();
+      if (data.loggedIn) {
+        document.getElementById('login-section').classList.add('hidden');
+        document.getElementById('dashboard-section').classList.remove('hidden');
+        document.getElementById('nav-tabs').classList.remove('hidden');
+        document.getElementById('auth-info').classList.remove('hidden');
+        document.getElementById('user-display').innerHTML = `<i class="fas fa-user mr-1"></i> ${data.user}`;
+        loadAllData();
+      } else {
+        document.getElementById('login-section').classList.remove('hidden');
+        document.getElementById('dashboard-section').classList.add('hidden');
+        document.getElementById('nav-tabs').classList.add('hidden');
+        document.getElementById('auth-info').classList.add('hidden');
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (data.success) {
+        errEl.classList.add('hidden');
+        checkAuth();
+      } else {
+        errEl.innerText = data.error || 'Đăng nhập thất bại!';
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      checkAuth();
+    }
+
+    function switchTab(tab) {
+      document.getElementById('tab-nodes').className = tab === 'nodes' ? 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center' : 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center';
+      document.getElementById('tab-report').className = tab === 'report' ? 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center' : 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center';
+
+      if (tab === 'nodes') {
+        document.getElementById('section-nodes').classList.remove('hidden');
+        document.getElementById('section-report').classList.add('hidden');
+      } else {
+        document.getElementById('section-nodes').classList.add('hidden');
+        document.getElementById('section-report').classList.remove('hidden');
+        loadReports();
+      }
+    }
+
+    async function loadAllData() {
+      await fetchNodes();
+      await fetchNumbers();
+      if (!document.getElementById('section-report').classList.contains('hidden')) {
+        loadReports();
+      }
+    }
+
+    async function fetchNodes() {
+      const res = await fetch('/api/nodes');
+      currentNodes = await res.json();
+      renderNodes(currentNodes);
+      populateNodeDropdowns(currentNodes);
+    }
+
+    // RENDER BẢNG NODE: KHÔNG CÒN STICKY ĐÈ CHỮ
+    function renderNodes(nodes) {
+      const tbody = document.getElementById('nodes-tbody');
+      tbody.innerHTML = nodes.map(n => `
+        <tr class="border-b border-gray-200 hover:bg-gray-50">
+          <td class="py-2.5 px-3 md:px-4 font-bold text-gray-800">${n.id}</td>
+          <td class="py-2.5 px-3 md:px-4 text-gray-600 font-mono text-xs">${n.host}</td>
+          <td class="py-2.5 px-2 text-center"><span class="bg-slate-600 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">${n.profile || 'COLLECTION'}</span></td>
+          <td class="py-2.5 px-2 text-center">${n.health === 'UP' ? '<span class="text-emerald-600 font-semibold text-xs">🟢 UP</span>' : '<span class="text-rose-600 font-semibold text-xs">🔴 DOWN</span>'}</td>
+          <td class="py-2.5 px-2 text-center"><span class="bg-emerald-500 text-white text-[11px] px-2 py-0.5 rounded-full font-bold">${n.active_num || 0}</span></td>
+          <td class="py-2.5 px-2 text-center"><span class="bg-cyan-500 text-white text-[11px] px-2 py-0.5 rounded-full font-bold">${n.backup_num || 0}</span></td>
+          <td class="py-2.5 px-2 text-center"><span class="bg-rose-500 text-white text-[11px] px-2 py-0.5 rounded-full font-bold">${n.blocked_num || 0}</span></td>
+          <td class="py-2.5 px-2 text-center"><span class="bg-slate-700 text-white text-[11px] px-2 py-0.5 rounded-full font-bold">${n.total_num || 0}</span></td>
+          <td class="py-2.5 px-2 text-center">
+            <select onchange="updateNodeStatus('${n.id}', this.value)" class="text-xs border rounded p-1 bg-white font-semibold">
+              <option value="FULL_ONLINE" ${n.status === 'FULL_ONLINE' ? 'selected' : ''}>FULL_ONLINE</option>
+              <option value="MANUAL_ONLY" ${n.status === 'MANUAL_ONLY' ? 'selected' : ''}>MANUAL_ONLY</option>
+              <option value="DISABLED" ${n.status === 'DISABLED' ? 'selected' : ''}>DISABLED</option>
+            </select>
+          </td>
+          <td class="py-2.5 px-3 md:px-4 text-center space-x-2">
+            <button onclick="openConfigModal('${n.id}')" class="text-amber-500 hover:text-amber-600 font-bold p-1.5" title="Cấu hình ngưỡng">
+              <i class="fas fa-cog text-sm"></i>
+            </button>
+            <button onclick="deleteNode('${n.id}')" class="text-rose-500 hover:text-rose-700 font-bold p-1.5" title="Xóa Node">
+              <i class="fas fa-trash text-sm"></i>
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function fetchNumbers() {
+      const res = await fetch('/api/numbers');
+      currentNumbers = await res.json();
+      filterNumbers();
+    }
+
+    function filterNumbers() {
+      const searchQuery = document.getElementById('search-phone').value.trim().toLowerCase();
+      const nodeFilter = document.getElementById('filter-node').value;
+      const statusFilter = document.getElementById('filter-status').value;
+
+      let filtered = currentNumbers;
+
+      if (searchQuery) {
+        filtered = filtered.filter(n => n.phone.toLowerCase().includes(searchQuery));
+      }
+      if (nodeFilter !== 'ALL') {
+        filtered = filtered.filter(n => n.node_id === nodeFilter);
+      }
+      if (statusFilter !== 'ALL') {
+        filtered = filtered.filter(n => n.status === statusFilter);
+      }
+
+      renderNumbers(filtered);
+    }
+
+    // RENDER BẢNG SỐ: NẰM TRONG KHUNG CUỘN TỰ NHIÊN
+    function renderNumbers(numbers) {
+  const tbody = document.getElementById('numbers-tbody');
+  if (numbers.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500 font-semibold">Không tìm thấy số điện thoại phù hợp</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = numbers.map(n => `
+    <tr class="border-b border-gray-200 hover:bg-gray-50">
+      <!-- SĐT -->
+      <td class="py-2 pl-3 pr-1 font-mono font-bold text-slate-800 text-xs sm:text-sm">
+        ${n.phone}
+      </td>
+
+      <!-- NODE -->
+      <td class="py-2 px-1.5 text-center text-slate-600 font-semibold text-xs">
+        ${n.node_id}
+      </td>
+
+      <!-- PROFILE (ẨN TRÊN MÀN HÌNH DỌC MOBILE) -->
+      <td class="py-2 px-2 text-center hidden sm:table-cell">
+        <span class="bg-slate-200 text-slate-700 text-[11px] px-2 py-0.5 rounded font-semibold">${n.profile || 'COLLECTION'}</span>
+      </td>
+
+      <!-- TRẠNG THÁI HIỂN THỊ ĐẦY ĐỦ -->
+      <td class="py-2 px-1 text-center">
+        <select onchange="updateNumberStatusDirectly('${n.phone}', this.value)" class="text-[11px] border rounded px-1.5 py-1 font-bold cursor-pointer outline-none ${
+          n.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
+          n.status === 'BACKUP' ? 'bg-cyan-50 text-cyan-700 border-cyan-300' :
+          'bg-rose-50 text-rose-700 border-rose-300'
+        }">
+          <option value="ACTIVE" ${n.status === 'ACTIVE' ? 'selected' : ''}>🟢 ACTIVE</option>
+          <option value="BACKUP" ${n.status === 'BACKUP' ? 'selected' : ''}>🔵 BACKUP</option>
+          <option value="BLOCKED" ${n.status === 'BLOCKED' ? 'selected' : ''}>🔴 BLOCKED</option>
+        </select>
+      </td>
+
+      <!-- NÚT ĐỔI SỐ -->
+      <td class="py-2 px-1 text-center">
+        ${n.status === 'ACTIVE' ? `<button onclick="markBlockedAndSwap('${n.phone}', '${n.node_id}')" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] px-2 py-1 rounded font-bold shadow-sm transition inline-flex items-center"><i class="fas fa-sync-alt mr-1"></i>Đổi Số</button>` : '-'}
+      </td>
+
+      <!-- NÚT XÓA -->
+      <td class="py-2 px-2 text-center">
+        <button onclick="deleteNumber('${n.phone}')" class="text-rose-500 hover:text-rose-700 font-bold p-1"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+    async function updateNumberStatusDirectly(phone, newStatus) {
+      const res = await fetch('/api/numbers/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, status: newStatus })
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadAllData();
+      } else {
+        alert(data.error || 'Lỗi đổi trạng thái số!');
+        loadAllData();
+      }
+    }
+
+    async function markBlockedAndSwap(phone, nodeId) {
+      if (!confirm(`Xác nhận KHÓA số ${phone} và TỰ ĐỘNG ĐỔI SỐ mới cho Node ${nodeId}?`)) return;
+
+      const res = await fetch('/api/numbers/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, status: 'BLOCKED' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Đã đổi số thành công! Số mới kích hoạt: ${data.newPhone}`);
+        loadAllData();
+      } else {
+        alert(data.error || 'Lỗi thực hiện đổi số!');
+      }
+    }
+
+    async function loadReports() {
+      const fromDate = document.getElementById('report-from-date').value;
+      const toDate = document.getElementById('report-to-date').value;
+
+      const res = await fetch('/api/reports/summary');
+      const data = await res.json();
+
+      let total = 0, active = 0, backup = 0, blocked = 0;
+      data.nodes_summary.forEach(n => {
+        total += n.total_numbers;
+        active += n.active_count;
+        backup += n.backup_count;
+        blocked += n.blocked_count;
+      });
+
+      document.getElementById('rpt-total-num').innerText = total;
+      document.getElementById('rpt-active-num').innerText = active;
+      document.getElementById('rpt-backup-num').innerText = backup;
+      document.getElementById('rpt-blocked-num').innerText = blocked;
+
+      renderPieCharts(active, backup, blocked, data.profiles_summary);
+
+      const profileTbody = document.getElementById('report-profile-tbody');
+      profileTbody.innerHTML = data.profiles_summary.map(p => {
+        const isLow = p.backup_ratio < 20.0;
+        return `
+          <tr class="border-b border-gray-200">
+            <td class="py-2 px-3 font-bold text-slate-800">${p.profile}</td>
+            <td class="py-2 px-3 text-center font-bold">${p.total_numbers}</td>
+            <td class="py-2 px-3 text-center text-emerald-600 font-bold">${p.active_count}</td>
+            <td class="py-2 px-3 text-center text-cyan-600 font-bold">${p.backup_count}</td>
+            <td class="py-2 px-3 text-center text-rose-600 font-bold">${p.blocked_count}</td>
+            <td class="py-2 px-3 text-center font-bold ${isLow ? 'text-rose-600' : 'text-emerald-600'}">${p.backup_ratio}%</td>
+            <td class="py-2 px-3 text-center font-bold">
+              ${isLow ? '<span class="bg-rose-100 text-rose-700 text-[11px] px-2 py-0.5 rounded-full">🚨 THIẾU</span>' : '<span class="bg-emerald-100 text-emerald-700 text-[11px] px-2 py-0.5 rounded-full">OK</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const nodeTbody = document.getElementById('report-node-tbody');
+      nodeTbody.innerHTML = data.nodes_summary.map(n => {
+        return `
+          <tr class="border-b border-gray-200 ${n.is_low_backup ? 'bg-rose-50' : ''}">
+            <td class="py-2 px-3 font-bold text-slate-800">${n.node_id}</td>
+            <td class="py-2 px-3 text-center"><span class="bg-slate-200 text-slate-700 text-[11px] px-2 py-0.5 rounded font-semibold">${n.profile}</span></td>
+            <td class="py-2 px-3 text-center font-bold text-emerald-600">${n.active_count}</td>
+            <td class="py-2 px-3 text-center font-bold text-cyan-600">${n.backup_count}</td>
+            <td class="py-2 px-3 text-center font-bold text-rose-600">${n.blocked_count}</td>
+            <td class="py-2 px-3 text-center font-bold">${n.total_numbers}</td>
+            <td class="py-2 px-3 text-center font-bold ${n.is_low_backup ? 'text-rose-600 font-extrabold' : 'text-slate-700'}">${n.backup_ratio}%</td>
+            <td class="py-2 px-3 text-center font-bold">
+              ${n.is_low_backup ? '<span class="bg-rose-600 text-white text-[11px] px-2 py-0.5 rounded-full animate-pulse">🚨 NẠP GẤP</span>' : '<span class="bg-emerald-500 text-white text-[11px] px-2 py-0.5 rounded-full">OK</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const logsRes = await fetch('/api/logs');
+      let logsData = await logsRes.json();
+
+      if (fromDate) {
+        logsData = logsData.filter(l => l.created_at >= fromDate);
+      }
+      if (toDate) {
+        logsData = logsData.filter(l => l.created_at <= toDate + ' 23:59:59');
+      }
+
+      const logsTbody = document.getElementById('logs-tbody');
+      if (logsData.length === 0) {
+        logsTbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500 font-semibold">Không có nhật ký đổi số</td></tr>`;
+        return;
+      }
+
+      logsTbody.innerHTML = logsData.map(l => `
+        <tr class="border-b border-gray-200 text-xs">
+          <td class="py-2 px-3 text-gray-600 font-mono">${l.created_at}</td>
+          <td class="py-2 px-3 font-bold text-slate-800">${l.node_id}</td>
+          <td class="py-2 px-3 font-mono text-rose-600 font-bold">${l.old_phone}</td>
+          <td class="py-2 px-3 font-mono text-emerald-600 font-bold">${l.new_phone}</td>
+          <td class="py-2 px-3 text-center"><span class="bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[11px] font-semibold">${l.swap_type}</span></td>
+          <td class="py-2 px-3 text-center text-gray-600 font-semibold">${l.operator || 'System'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderPieCharts(active, backup, blocked, profilesSummary) {
+      const ctx1 = document.getElementById('statusPieChart').getContext('2d');
+      if (statusChartInstance) statusChartInstance.destroy();
+
+      statusChartInstance = new Chart(ctx1, {
+        type: 'pie',
+        data: {
+          labels: ['Active', 'Backup', 'Blocked'],
+          datasets: [{
+            data: [active, backup, blocked],
+            backgroundColor: ['#10b981', '#06b6d4', '#f43f5e']
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+
+      const ctx2 = document.getElementById('profilePieChart').getContext('2d');
+      if (profileChartInstance) profileChartInstance.destroy();
+
+      const profileLabels = profilesSummary.map(p => p.profile);
+      const profileData = profilesSummary.map(p => p.total_numbers);
+
+      profileChartInstance = new Chart(ctx2, {
+        type: 'pie',
+        data: {
+          labels: profileLabels,
+          datasets: [{
+            data: profileData,
+            backgroundColor: ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6']
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+    }
+
+    function exportReportExcel() {
+      const fromDate = document.getElementById('report-from-date').value;
+      const toDate = document.getElementById('report-to-date').value;
+      window.location.href = `/api/reports/export-excel?fromDate=${fromDate}&toDate=${toDate}`;
+    }
+
+    function exportReportPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      doc.setFontSize(16);
+      doc.text("BAO CAO THONG KE HE THONG FREESWITCH", 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Ngay xuat: ${new Date().toLocaleString()}`, 14, 22);
+
+      doc.autoTable({
+        startY: 28,
+        head: [['Profile', 'Tong So', 'Active', 'Backup', 'Blocked', 'Ty Le Backup']],
+        body: Array.from(document.querySelectorAll('#report-profile-tbody tr')).map(tr => {
+          const tds = tr.querySelectorAll('td');
+          return [tds[0]?.innerText, tds[1]?.innerText, tds[2]?.innerText, tds[3]?.innerText, tds[4]?.innerText, tds[5]?.innerText];
+        })
+      });
+
+      doc.text("Lich Su Doi So Gan Day", 14, doc.lastAutoTable.finalY + 10);
+      doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 15,
+        head: [['Thoi Gian', 'Node ID', 'So Bi Khoa', 'So Moi', 'Loai Doi', 'Nguoi Thuc Hien']],
+        body: Array.from(document.querySelectorAll('#logs-tbody tr')).map(tr => {
+          const tds = tr.querySelectorAll('td');
+          return [tds[0]?.innerText, tds[1]?.innerText, tds[2]?.innerText, tds[3]?.innerText, tds[4]?.innerText, tds[5]?.innerText];
+        })
+      });
+
+      doc.save(`Bao_Cao_FreeSWITCH_${Date.now()}.pdf`);
+    }
+
+    function resetReportDateFilter() {
+      document.getElementById('report-from-date').value = '';
+      document.getElementById('report-to-date').value = '';
+      loadReports();
+    }
+
+    function populateNodeDropdowns(nodes) {
+      const filterSelect = document.getElementById('filter-node');
+      const addNumSelect = document.getElementById('add-num-node');
+
+      const currentFilter = filterSelect.value;
+      filterSelect.innerHTML = '<option value="ALL">Tất cả Node</option>' + nodes.map(n => `<option value="${n.id}">${n.id}</option>`).join('');
+      filterSelect.value = currentFilter;
+
+      addNumSelect.innerHTML = nodes.map(n => `<option value="${n.id}">${n.id} (${n.profile})</option>`).join('');
+    }
+
+    async function updateNodeStatus(nodeId, status) {
+      await fetch('/api/nodes/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, status })
+      });
+      loadAllData();
+    }
+
+    async function deleteNode(nodeId) {
+      if (!confirm(`Xác nhận xóa Node ${nodeId} và toàn bộ số thuộc Node này?`)) return;
+      await fetch('/api/nodes/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId })
+      });
+      loadAllData();
+    }
+
+    async function deleteNumber(phone) {
+      if (!confirm(`Xóa SĐT ${phone}?`)) return;
+      await fetch('/api/numbers/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      loadAllData();
+    }
+
+    async function bulkDeleteNumbers() {
+      const nodeId = document.getElementById('filter-node').value;
+      const status = document.getElementById('filter-status').value;
+
+      if (!confirm(`Xóa hàng loạt số theo bộ lọc (Node: ${nodeId}, Status: ${status})?`)) return;
+
+      const res = await fetch('/api/numbers/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, status })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Đã xóa thành công ${data.deleted} SĐT!`);
+        loadAllData();
+      }
+    }
+
+    // ==========================================
+    // LOGIC CẤU HÌNH NGƯỠNG AUTO-SWAP
+    // ==========================================
+    async function openConfigModal(nodeId) {
+      currentEditingNodeConfig = nodeId;
+      document.getElementById('cfg-display-node').innerText = nodeId;
+      document.getElementById('modal-config-auto-swap').classList.remove('hidden');
+
+      try {
+        const res = await fetch(`/api/config/auto-swap/${nodeId}`);
+        const data = await res.json();
+        const cfg = data.config || {};
+
+        document.getElementById('cfg-max-errors').value = cfg.maxErrors || 40;
+        document.getElementById('cfg-time-window').value = cfg.timeWindowSec || 15;
+        document.getElementById('cfg-setup-time').value = cfg.maxSetupTimeSec !== undefined ? cfg.maxSetupTimeSec : 0.5;
+
+        const codes = cfg.sipCodes || ['480'];
+        document.getElementById('cfg-sip-480').checked = codes.includes('480');
+        document.getElementById('cfg-sip-503').checked = codes.includes('503');
+        document.getElementById('cfg-sip-500').checked = codes.includes('500');
+      } catch (e) {
+        console.error("Lỗi lấy config:", e);
+      }
+    }
+
+    async function saveAutoSwapConfig() {
+      const maxErrors = parseInt(document.getElementById('cfg-max-errors').value, 10);
+      const timeWindowSec = parseInt(document.getElementById('cfg-time-window').value, 10);
+      const maxSetupTimeSec = parseFloat(document.getElementById('cfg-setup-time').value);
+
+      const sipCodes = [];
+      if (document.getElementById('cfg-sip-480').checked) sipCodes.push('480');
+      if (document.getElementById('cfg-sip-503').checked) sipCodes.push('503');
+      if (document.getElementById('cfg-sip-500').checked) sipCodes.push('500');
+
+      if (sipCodes.length === 0) {
+        alert('Vui lòng chọn ít nhất 1 mã lỗi SIP!');
+        return;
+      }
+
+      const btnSave = document.getElementById('btn-save-cfg');
+      btnSave.disabled = true;
+      btnSave.innerText = 'Đang lưu...';
+
+      try {
+        const res = await fetch('/api/config/auto-swap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nodeId: currentEditingNodeConfig,
+            maxErrors,
+            timeWindowSec,
+            maxSetupTimeSec,
+            sipCodes
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✅ Cập nhật thành công cấu hình cho Node [${currentEditingNodeConfig}]!`);
+          closeModal('modal-config-auto-swap');
+        } else {
+          alert('❌ Lỗi: ' + (data.error || 'Không thể lưu cấu hình'));
+        }
+      } catch (err) {
+        alert('❌ Lỗi gửi request: ' + err.message);
+      } finally {
+        btnSave.disabled = false;
+        btnSave.innerText = 'Lưu Cấu Hình';
+      }
+    }
+
+    function openAddNodeModal() { document.getElementById('modal-add-node').classList.remove('hidden'); }
+    function openAddNumbersModal() { document.getElementById('modal-add-numbers').classList.remove('hidden'); }
+    function openUploadExcelModal() { document.getElementById('modal-upload-excel').classList.remove('hidden'); }
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+    // Hàm tự động đổi gợi ý Port khi chọn loại Node
+    function handleNodeTypeChange() {
+      const type = document.getElementById('add-node-type').value;
+      const portInput = document.getElementById('add-node-port');
+      const portLabel = document.getElementById('label-node-port');
+
+      if (type === 'OPENSIPS') {
+        portLabel.innerText = 'HTTP PORT (Mặc định: 8888)';
+        portInput.value = 8888;
+      } else if (type === 'KAMAILIO') {
+        portLabel.innerText = 'JSONRPC/BIN PORT (Mặc định: 5060 hoặc 8080)';
+        portInput.value = 5060;
+      } else { // FreeSWITCH
+        portLabel.innerText = 'ESL PORT (Mặc định: 8021)';
+        portInput.value = 8021;
+      }
+    }
+
+    // Cập nhật hàm submitAddNode để lấy thêm trường type
+    async function submitAddNode() {
+      const id = document.getElementById('add-node-id').value;
+      const host = document.getElementById('add-node-host').value;
+      const port = document.getElementById('add-node-port').value;
+      const profile = document.getElementById('add-node-profile').value;
+      const type = document.getElementById('add-node-type').value; // Lấy type từ Dropdown
+
+      if (!id || !host) {
+        alert("Vui lòng nhập đầy đủ Node ID và IP Host!");
+        return;
+      }
+
+      const res = await fetch('/api/nodes/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, host, port, profile, type }) // Bắn type xuống Backend
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        closeModal('modal-add-node');
+        // Reset lại form về mặc định
+        document.getElementById('add-node-id').value = '';
+        document.getElementById('add-node-host').value = '';
+        document.getElementById('add-node-type').value = 'FS';
+        handleNodeTypeChange();
+        
+        loadAllData();
+      } else {
+        alert("Lỗi thêm Node: " + (data.error || "Không xác định"));
+      }
+    }
+
+    async function submitAddNumbers() {
+      const nodeId = document.getElementById('add-num-node').value;
+      const listStr = document.getElementById('add-num-list').value;
+      const phones = listStr.split('\n').filter(p => p.trim() !== '');
+
+      const res = await fetch('/api/numbers/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, phones })
+      });
+      if ((await res.json()).success) {
+        closeModal('modal-add-numbers');
+        document.getElementById('add-num-list').value = '';
+        loadAllData();
+      }
+    }
+
+    async function submitUploadExcel() {
+      const fileInput = document.getElementById('excel-file-input');
+      if (!fileInput.files[0]) return alert('Vui lòng chọn file Excel!');
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+
+      const res = await fetch('/api/numbers/upload-excel', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Import thành công ${data.count} số điện thoại!`);
+        closeModal('modal-upload-excel');
+        fileInput.value = '';
+        loadAllData();
+      } else {
+        alert(data.error || 'Lỗi khi import Excel!');
+      }
+    }
+  </script>
+</body>
+</html>
