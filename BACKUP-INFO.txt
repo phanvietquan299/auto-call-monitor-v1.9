@@ -1,0 +1,7 @@
+Production source snapshot before Import Excel and selected deletion deployment.
+Server: 10.10.101.67:5003
+Original folder: /opt/freeswitch-automation-app-dev
+Full private backup: /opt/backups/freeswitch-production-5003-20261102-115001
+This Git snapshot excludes credentials, database, logs, uploads, dependencies, test files and Markdown.
+Hardcoded secret values are redacted. Restore secrets from the private server backup before running.
+Production was not modified or restarted.
