@@ -2,7 +2,9 @@
 (/** Tác dụng: Khởi tạo module, đóng gói state nội bộ và đăng ký API/listener của thành phần này. */ () => {
   const group=location.hostname==='10.10.99.153'?'99.153':location.hostname==='10.10.99.155'?'99.155':null;
   if(!group)return;
-  const listing=new URL('/cp/tools/system/loadbalancer/loadbalancer.php?action=add',location.origin).href;
+  const listing=new URL('/cp/tools/system/loadbalancer/loadbalancer.php',location.origin).href;
+  // Keep the known POST Refresh contract separate from the GET listing URL.
+  const refreshEndpoint=listing+'?action=add';
   const pageId=`${Date.now()}-${Math.random()}`;
   let running=false,stage='VALIDATING';
   const text=/** Tác dụng: Chuẩn hóa nhãn nút hoặc nội dung control để nhận diện thao tác trên trang. */ el=>(el?.value||el?.textContent||el?.getAttribute?.('aria-label')||el?.getAttribute?.('title')||'').replace(/\s+/g,' ').trim();
@@ -68,7 +70,7 @@
     return result;
   }
   /** Tác dụng: Yêu cầu Refresh from Server để lấy Group ID và VT từ runtime OpenSIPS. */
-  async function refresh(){return request(listing,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'refresh='+encodeURIComponent('Refresh from Server')});}
+  async function refresh(){return request(refreshEndpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'refresh='+encodeURIComponent('Refresh from Server')});}
   /** Tác dụng: Kiểm tra FS và Group ID cũ, sửa đúng form, Save rồi Reload và đọc lại runtime Group ID. */
   async function change(msg){
     const allowed=group==='99.153'?['FS01','FS02','FS03','FS04','OS01']:['FS05','FS06','FS07'];

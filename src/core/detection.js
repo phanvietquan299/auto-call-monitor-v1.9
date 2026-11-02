@@ -95,13 +95,6 @@
     const c={...CONFIG,...s.config},groups={};
     for(const group of ['99.153','99.155']){
       const current=scheduleAt(now,c,group),previous=s.schedule?.groups?.[group];
-      if(group==='99.153'){
-        const local=new Date(now+25200000),date=local.toISOString().slice(0,10),minute=local.getUTCHours()*60+local.getUTCMinutes();
-        const previousDate=new Date(local.getTime()-86400000).toISOString().slice(0,10),eveningDate=minute>=1080?date:minute<480?previousDate:null;
-        const saved=s.collectionEvening,stopped=saved?.date===eveningDate&&(saved.status==='NIGHT'||saved.policy===27&&['FINAL_CONFIRMED','RUNNING','FAILED'].includes(saved.status));
-        if(eveningDate&&stopped)Object.assign(current,{paused:true,phase:'DAY_END',startAt:'18:05',endAt:'08:00',cycle:eveningDate+'|DAY_END',pauseId:eveningDate+'|DAY_END'});
-        if(eveningDate&&!stopped&&minute>=1080&&minute<1085)Object.assign(current,{paused:false,phase:'FINAL_CHANGE',cycle:eveningDate+'|AFTER',endAt:'08:00'});
-      }
       const entering=current.paused&&(!previous?.paused||previous.pauseId!==current.pauseId);
       const resuming=!current.paused&&(previous?.paused||previous&&previous.cycle!==current.cycle);
       for(const f of Object.values(s.fsStates||{})){

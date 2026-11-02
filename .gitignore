@@ -36,3 +36,6 @@ __pycache__/
 !/tests/os01-cdr-only.test.js
 
 !/tests/managed-nodes.test.js
+
+# Private preview deployment access and tooling
+/.monitor-deploy/

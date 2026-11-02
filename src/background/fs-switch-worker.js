@@ -24,9 +24,15 @@ async function switchTab(url){
   const tabs=await chrome.tabs.query({url});if(tabs.length!==1)throw Error('Cần mở đúng một tab: '+url);return tabs[0].id;}
 /** Tác dụng: Gửi lệnh tới content script và từ chối kết quả không xác nhận thành công. */
 async function switchCommand(id,msg){if(['AUTO_BLOCK_FS','MANUAL_FS_STATUS'].includes(msg.type)&&Detection.collectionHardStop(msg.profile==='COLLECTION'?'99.153':'99.155',Date.now()))throw Error('Collection nghỉ 18:05–08:00; không đổi số');if(msg.type==='FS_SWITCH_SET_GROUP'){const live=await getState();if(msg.value!==0&&Detection.collectionHardStop(msg.group,Date.now()))throw Error('Collection nghỉ 18:05–08:00; không bật node');if(!Detection.isNodeSelected(live,{group:msg.group,ip:msg.node?.ip}))throw Error('Node không được chọn monitor; không đổi Group ID');}const r=await chrome.tabs.sendMessage(id,msg);if(!r?.ok)throw Error(r?.error||'Trang không xác nhận thành công.');return r;}
-/** Tác dụng: Reload trang sau thao tác và chờ đọc lại Group ID đúng giá trị mong đợi. */
+/** Mở danh sách bằng GET; không reload tài liệu POST để tránh hộp thoại gửi lại form. */
+async function navigateLoadBalancer(tab,group){
+ if(!FsSwitch.groups[group])throw Error('Nhóm OpenSIPS không hợp lệ.');
+ await chrome.tabs.update(tab,{url:`http://10.10.${group}/cp/tools/system/loadbalancer/loadbalancer.php`});
+}
+/** Tác dụng: Mở lại trang bằng GET và xác minh Group ID từ content script mới. */
 async function refreshSwitchPage(tab,node,value,oldPageId){
-  await chrome.tabs.reload(tab,{bypassCache:true});
+  const group=Object.keys(FsSwitch.groups).find(key=>FsSwitch.groups[key].fs.includes(node.fs));
+  await navigateLoadBalancer(tab,group);
   const deadline=Date.now()+20000;
   let reason='Đang chờ trang OpenSIPS tải lại';
   do{
@@ -319,7 +325,7 @@ async function processSwitch(msg){
     const tab=await switchTab(`http://10.10.${msg.group}/*`);
     const result=await switchCommand(tab,{type:'FS_SWITCH_RELOAD_SERVER',group:msg.group});
     if(!result.reloaded)throw Error('Chưa xác nhận lb_reload thành công.');
-    await chrome.tabs.reload(tab,{bypassCache:true});
+    await navigateLoadBalancer(tab,msg.group);
     return {ok:true,group:msg.group,reloaded:true,pageRefreshed:true};
   }
   if(msg.type==='FS_SWITCH_TOGGLE_NODE')return toggleFsNode(msg,f,s);
@@ -354,12 +360,14 @@ async function processSwitch(msg){
     f.enabled=!!msg.enabled;f.mode=msg.mode;
   }
   if(msg.type==='FS_SWITCH_RELEASE'){
-    if(f.enabled||!f.operation||f.operation.status==='RUNNING'||f.operation.id!==msg.operationId)throw Error('Tắt Thay FS và kiểm tra thủ công trước khi mở khóa.');
+    if(!f.operation||!['FAILED','DONE'].includes(f.operation.status)||f.operation.id!==msg.operationId)throw Error('Lượt chuyển đã thay đổi; đọc lại trạng thái trước khi xác nhận xử lý tay.');
+    // Pause rotation atomically with acknowledgement. Never replay a partially applied job.
+    f.enabled=false;
     const id=f.operation.id;
     f.quarantined=Object.fromEntries(Object.entries(f.quarantined).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong processSwitch. */ ([,value])=>value!==id));
     f.handled=Object.fromEntries(Object.entries(f.handled).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong processSwitch. */ ([,value])=>value!==id));
-    f.operation.acknowledgedAt=Date.now();f.operation.status='ACKNOWLEDGED';f.operation.targetWatchPending=false;
-    for(const op of f.history)if(op.id===id){op.status='ACKNOWLEDGED';op.targetWatchPending=false;op.acknowledgedAt=f.operation.acknowledgedAt;}
+    f.operation.acknowledgedAt=Date.now();f.operation.acknowledgement='MANUAL_RESOLUTION';f.operation.status='ACKNOWLEDGED';f.operation.targetWatchPending=false;
+    for(const op of f.history)if(op.id===id){op.status='ACKNOWLEDGED';op.targetWatchPending=false;op.acknowledgedAt=f.operation.acknowledgedAt;op.acknowledgement='MANUAL_RESOLUTION';}
   }
   const candidates=FsSwitch.plans(s,f,Date.now());
   if(msg.type==='FS_SWITCH_CONFIRM'){

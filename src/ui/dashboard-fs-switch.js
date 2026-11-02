@@ -19,8 +19,19 @@
       if(!thresholdDirty&&document.activeElement!==el("fs-backup-threshold"))el("fs-backup-threshold").value=snapshot.threshold??10;
       for(const group of Object.keys(FsSwitch.groups)){const key=group.replace(".","-"),p=f.nextSwitch?.[group];el("preset-status-"+key).textContent=p?`Đã đặt: ${p.source?'Tắt '+p.source:''}${p.source&&p.target?' · ':''}${p.target?'Bật '+p.target:''}`:"Tự chọn theo BACKUP";}
       el('fs-switch-status').textContent=f.operation?`${f.operation.plan.source.fs} → ${f.operation.plan.target.fs}: ${f.operation.status==='DONE'?'Đã chuyển':f.operation.status==='RUNNING'?'Đang chuyển':f.operation.status==='FAILED'?'Cần kiểm tra':'Đã xử lý'}`:'';
+      const failed=f.operation?.status==='FAILED';
+      if(failed)el('fs-switch-status').textContent+=' · '+(f.operation.error||'Lượt chuyển chưa được xác minh');
+      if(f.operation?.status==='ACKNOWLEDGED')el('fs-switch-status').textContent+=' · Đã xác nhận xử lý tay; Thay FS đang OFF.';
       el('fs-switch-status').title=f.operation?.error||'';
-      el('fs-switch-release').hidden=f.enabled||!['FAILED','DONE'].includes(f.operation?.status);
+      const needsAck=failed||!f.enabled&&f.operation?.status==='DONE';
+      el('fs-switch-failure').hidden=!needsAck;
+      if(needsAck){
+        el('fs-switch-failure-heading').textContent=failed?'THAY FS CHƯA HOÀN TẤT':'THAY FS · XÁC NHẬN KIỂM TRA';
+        const op=f.operation,at=op.finishedAt||op.startedAt;
+        const time=Number.isFinite(at)?new Date(at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}):'';
+        el('fs-switch-failure-detail').textContent=`${op.plan.source.fs} → ${op.plan.target.fs}${time?' · '+time:''}\nBước: ${op.stage||'Chưa xác định'}\n${op.error||'Chưa xác minh được kết quả. Không tự gửi lại lệnh.'}`;
+      }
+      el('fs-switch-release').hidden=!needsAck;
       el('fs-switch-plans').innerHTML=snapshot.candidates.map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng. */ (p,i)=>`<p>${p.action==='ENABLE'?'Bật '+escape(p.target.fs):p.action==='DISABLE'?'Tắt '+escape(p.source.fs):escape(p.source.fs)+' → '+escape(p.target.fs)} · ${escape(p.profile)} · BACKUP ${p.source.backups} → ${p.target.backups} <button data-switch-plan="${i}" ${!f.enabled||f.mode!=='MANUAL'?'disabled':''}>Xác nhận chuyển</button></p>`).join('')||'';
     }catch(e){el('fs-switch-status').textContent=e.message;}
   }
@@ -110,7 +121,8 @@
   };
   el('fs-switch-release').onclick=/** Tác dụng: Gửi xác nhận đã kiểm tra tay để giải phóng khóa thao tác thay FS. */ async()=>{
     if(busy||!snapshot?.feature.operation)return;
-    if(!confirm('Đã kiểm tra và xử lý Group ID OpenSIPS, trạng thái số FreeSWITCH của lượt chuyển đang dở?'))return;
+    if(!['FAILED','DONE'].includes(snapshot.feature.operation.status))return;
+    if(!confirm('Bạn đã xử lý tay Group ID OpenSIPS và trạng thái số FreeSWITCH của lượt lỗi này? Xác nhận sẽ mở khóa, tắt Thay FS và KHÔNG chạy lại lượt cũ. Bật Thay FS lại khi sẵn sàng.'))return;
     busy=true;
     try{await send({type:'FS_SWITCH_RELEASE',operationId:snapshot.feature.operation.id});}
     catch(e){confirmationNotice(e.message);}

@@ -17,6 +17,16 @@
   /** Rebuild the plan from phone/public IP input, never trust caller-selected FS or profile. */
   async function process(message){
     const now=Date.now();
+    // Read all server inventory, including unmanaged nodes and every status; never issue a write.
+    if(message.type==='PHONE_EXPORT'){
+      const id=await tab(),data=await request(id,{type:'PHONE_EXPORT_INVENTORY'});
+      if(!Array.isArray(data.nodes)||!Array.isArray(data.numbers))fail('Kho số FreeSWITCH không hợp lệ');
+      const rows=data.numbers.map(n=>{
+        const node=data.nodes.find(x=>String(x.id)===String(n.node_id));
+        return {phone:String(n.phone??''),fs:String(n.node_id??''),profile:String(n.profile??node?.profile??''),ip:String(node?.host??''),status:String(n.status??'')};
+      });
+      return {ok:true,phoneExport:{at:now,rows}};
+    }
     if(message.type==='PHONE_IMPORT_PREVIEW'){
       if(!['coll','tls','both'].includes(message.selectedSheet)||!Array.isArray(message.entries)||!message.entries.length||message.entries.length>10000)fail('Danh sách nạp không hợp lệ');
       if(JSON.stringify(message.entries).length>250000)fail('Danh sách quá lớn; tối đa 10.000 số mỗi lần');

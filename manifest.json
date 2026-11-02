@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Call Monitor V1.9",
-  "version": "1.17.44",
+  "version": "1.17.52",
   "description": "Persistent monitor dashboard for OpenSIPS VT/CDR with manual monitoring toggle and event log.",
   "permissions": [
     "storage",

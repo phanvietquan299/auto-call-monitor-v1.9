@@ -323,7 +323,7 @@ let messageQueue=Promise.resolve();
 /** Tác dụng: Tiếp nhận lệnh dashboard/content script, tuần tự hóa thay đổi và trả kết quả cho bên gọi. */
 function handleMainMessage(msg,sender,sendResponse){
   if(msg.type?.startsWith('FS_SWITCH_'))return;
-  if(['PHONE_IMPORT_PREVIEW','PHONE_IMPORT_EXECUTE'].includes(msg.type)){PhoneImportWorker.handle(msg).then(sendResponse);return true;}
+  if(['PHONE_IMPORT_PREVIEW','PHONE_IMPORT_EXECUTE','PHONE_EXPORT'].includes(msg.type)){PhoneImportWorker.handle(msg).then(sendResponse);return true;}
   if(msg.type==='PHONE_IMPORT_CONTEXT'){
     // Keep the same single-FreeSWITCH-tab rule as number status writes.
     if(!sender.tab?.id||!sender.tab.url?.startsWith('http://10.10.101.67:5003/')){sendResponse({ok:false,error:'Chỉ nạp từ tab FreeSWITCH'});return;}
@@ -625,7 +625,14 @@ function recoverSourceTabs(){
     await Promise.allSettled(tabs.filter(t=>t.id!=null&&t.status!=='loading'&&urls.some(pattern=>t.url?.startsWith(pattern.slice(0,-1)))).map(async tab=>{
       let ready=false;
       try{const result=await chrome.tabs.sendMessage(tab.id,{type:'MONITOR_CONTENT_READY'});ready=result?.ok===true&&result.ready===true;}catch{}
-      if(!ready)await chrome.tabs.reload(tab.id);
+      if(!ready){
+        if(/^http:\/\/10\.10\.99\.(153|155)\//.test(tab.url||'')){
+          const url=new URL(tab.url);
+          if(url.pathname.includes('/loadbalancer/')){url.pathname='/cp/tools/system/loadbalancer/loadbalancer.php';url.search='';}
+          else if(url.pathname.includes('/cdrviewer/')){url.pathname='/cp/tools/system/cdrviewer/cdrviewer.php';url.search='';}
+          await chrome.tabs.update(tab.id,{url:url.href});
+        }else await chrome.tabs.reload(tab.id);
+      }
     }));
   })().catch(error=>console.warn('Không thể làm mới tab nguồn:',String(error.message||error))).finally(()=>{sourceTabRecovery=null;});
   return sourceTabRecovery;

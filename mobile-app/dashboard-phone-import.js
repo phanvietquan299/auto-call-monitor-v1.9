@@ -97,5 +97,23 @@
       finally{lock(false);}
     };
   }
-  mount();
+  /** Đọc toàn bộ kho số theo yêu cầu; tạo XLSX tại trình duyệt, không sửa dữ liệu nguồn. */
+  function mountExport(){
+    const button=document.getElementById('phone-export'),status=document.getElementById('phone-export-status');
+    if(!button)return;
+    button.onclick=async()=>{
+      button.disabled=true;status.textContent='Đang đọc toàn bộ kho số từ FreeSWITCH…';
+      try{
+        const response=await send({type:'PHONE_EXPORT'}),data=response.phoneExport;
+        if(!Array.isArray(data?.rows))throw Error('Không nhận được kho số; cập nhật extension máy nguồn');
+        const result=HistoryExport.inventoryWorkbook(data.rows),blob=new Blob([result.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+        const url=URL.createObjectURL(blob),link=document.createElement('a');
+        link.href=url;link.download='kho-so-freeswitch-'+new Date(data.at+25200000).toISOString().slice(0,19).replace(/[:T]/g,'-')+'.xlsx';
+        document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+        status.textContent=`Đã xuất ${result.count} số (tất cả FS và trạng thái).`;
+      }catch(error){status.textContent=String(error.message||error);}
+      finally{button.disabled=false;}
+    };
+  }
+  mount();mountExport();
 })();

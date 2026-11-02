@@ -25,13 +25,13 @@ việc sắp xếp này không chuyển sang ES modules hay đổi quy tắc x�
 src/core/detection.js: baseline, VT + CDR, trạng thái và ngưỡng xử lý.
 src/core/cdr.js: phân tích CDR và chuỗi lỗi.
 src/core/fs-switch.js: kế hoạch thay FS theo BACKUP/đặt trước.
-src/core/collection-evening.js: sau 18:00 chờ lượt locked cuối thành công.
+src/core/collection-evening.js: tương thích trạng thái cũ, không tạo công việc tắt/bật FS theo lịch.
 src/core/history-export.js: tạo Excel.
 
 src/background/background.js: state, lịch, message queue và AUTO BLOCK.
 src/background/cdr-worker.js: điều phối lượt lấy CDR.
 src/background/fs-switch-worker.js: bật/tắt/thay FS và xác minh Reload.
-src/background/collection-evening-worker.js: thực thi nghỉ đêm Collection.
+src/background/collection-evening-worker.js: hủy lịch routing NIGHT/MORNING cũ; chỉ áp dụng lịch dừng đánh giá.
 src/background/history-db.js: bộ đệm/outbox IndexedDB.
 src/background/history-cloud.js: đồng bộ lịch sử Supabase.
 src/background/telegram-worker.js: remote bridge và snapshot app.
@@ -80,3 +80,21 @@ HÀNG ĐỢI APP (1.17.44)
 - Adapter mobile giữ tối đa 10 yêu cầu đang chờ trong bộ nhớ trang, chỉ gửi yêu cầu kế tiếp sau khi có kết quả yêu cầu trước. Không tự retry kết quả chưa rõ.
 - Các thao tác trùng đang chờ dùng chung kết quả. Đổi phiên đăng nhập hoặc chờ quá 90 giây thì hủy yêu cầu chưa gửi. GET_STATE/HISTORY_READ vẫn đọc độc lập.
 - Giữ app mở khi có yêu cầu chưa gửi; cập nhật app bị khóa đến khi hàng đợi trống. Nút node chỉ khóa đúng FS đang chờ, không khóa các FS khác.
+
+- Không còn bảng hàng đợi trên app; chỉ giữ thông báo thao tác ngắn.
+
+XUẤT KHO SỐ (1.17.49)
+- PHONE_EXPORT đọc API /api/nodes + /api/numbers từ tab FreeSWITCH đăng nhập, không lọc theo node quản lý hoặc trạng thái; không POST số, không phụ thuộc journal nạp chưa xác minh.
+- Trả các cột phone/fs/profile/ip/status qua kết quả lệnh đã xác thực; không đưa kho số vào snapshot định kỳ hoặc thông báo Telegram. XLSX được tạo tại trình duyệt, các trường dữ liệu là ô text để giữ số 0 đầu.
+- Chỉ đọc khi người dùng bấm Xuất số; desktop chia đôi hai khu vực, mobile xếp dọc.
+
+LỊCH VÀ REFRESH (1.17.50)
+- Collection dừng đánh giá và hành động tự động từ 18:05 đến 08:00; không sửa Group ID, không lưu node để bật lại sáng hôm sau. Sale giữ lịch 17:00–08:00. MONITOR tắt tay vẫn giữ nguyên.
+- Mọi job Collection NIGHT/MORNING cũ bị hủy, không thực thi routing dù còn resumeNodes trong storage.
+- Refresh OpenSIPS chuyển sang URL GET của danh sách/công cụ, không reload tài liệu POST. Sau đổi Group ID vẫn phải đọc được pageId mới và runtime Group ID đúng; không tự retry Save hoặc mở khóa lượt FAILED.
+
+XÁC NHẬN LỖI THAY FS (1.17.51)
+- Thẻ FAILED hiện ở đầu main trên desktop/mobile, gồm thời gian, source/target, stage và error bằng textContent. Nút xác nhận không nằm trong mobile-advanced.
+- FS_SWITCH_RELEASE yêu cầu đúng operationId FAILED/DONE; đặt enabled=false cùng lần lưu, xóa handled/quarantined chỉ của operation đó, lưu ACKNOWLEDGED + acknowledgedAt + MANUAL_RESOLUTION. Không sửa Group ID, không chạy lại kế hoạch cũ, không xóa preset mới.
+
+- 1.17.52: GET điều hướng/đọc danh sách dùng loadbalancer.php không có action; action=add chỉ giữ cho POST refresh=Refresh from Server theo form cũ, không điều hướng trình duyệt tới form Add New Destination.

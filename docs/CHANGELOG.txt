@@ -1,3 +1,11 @@
+1.17.52: Sửa URL GET refresh về danh sách loadbalancer.php, không đi vào action=add (Add New Destination). Giữ nguyên POST Refresh from Server nội bộ và xác minh Group ID.
+1.17.51: Hiện thẻ lỗi thay FS bên ngoài phần cài đặt thu gọn; cho xác nhận đã xử lý tay ngay khi Thay FS đang ON. Xác nhận lưu lịch sử, mở đúng khóa lượt lỗi và chuyển Thay FS OFF, không phát lại lệnh cũ.
+1.17.50: Collection chỉ dừng can thiệp 18:05–08:00, bỏ tắt/bật FS theo NIGHT/MORNING và vô hiệu hóa job cũ. OpenSIPS refresh bằng GET để tránh gửi lại form POST; giữ xác minh Group ID/runtime và khóa khi chưa rõ kết quả. Hiện rõ lỗi thay FS trên dashboard.
+1.17.49: Chia khu vực Nạp số / Xuất số; xuất toàn bộ kho FreeSWITCH ra XLSX gồm mọi FS, ACTIVE/BLOCKED/BACKUP, hỗ trợ mobile/Vercel qua bridge đã xác thực.
+1.17.48: Khôi phục 203.113.174.24 → FS03 (10.10.101.184); thêm 115.84.183.24 → OS01 (10.10.99.140) cho Excel Collection.
+1.17.47: Sửa mapping nạp Excel Collection: 203.113.174.24 → OS01 (10.10.99.140), thay mapping FS03 cũ.
+1.17.46: Gỡ chức năng theo dõi và đặt tên thiết bị; giữ hàng đợi thao tác chạy ngầm.
+
 1.17.44: App/Vercel xếp hàng thao tác thay vì từ chối lệnh thứ hai; hiện từng yêu cầu chờ/đang chạy/hoàn tất. Giữ thứ tự gửi, chống bấm trùng, hủy yêu cầu chưa gửi khi đổi phiên hoặc chờ quá 90 giây. Bật/tắt FS chỉ khóa node đang chờ, cho chọn node khác.
 
 1.17.43: Ô chọn nhóm nạp đổi thành checkbox vuông tương phản rõ; cho chọn COLL, TLS hoặc cả hai. Chỉ đọc các sheet được tick; đổi lựa chọn hủy preview cũ. Hỗ trợ đồng thời trên desktop/mobile/Vercel, kiểm tra scope từng nhóm tại máy nguồn.

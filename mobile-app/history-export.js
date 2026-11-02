@@ -50,5 +50,17 @@
    'xl/worksheets/sheet1.xml':sheet(rows),'xl/worksheets/sheet2.xml':sheet(summary)
   })};
  }
- const api={records,workbook};if(typeof module!=='undefined')module.exports=api;else root.HistoryExport=api;
+ /** Xuất kho số dạng văn bản trong XLSX, giữ số 0 đầu và không chạy công thức từ dữ liệu. */
+ function inventoryWorkbook(inventory){
+  const rows=[['STT','Số điện thoại','FS','Profile','IP nội bộ','Trạng thái'],...inventory.map((n,i)=>[i+1,String(n.phone??''),String(n.fs??''),String(n.profile??''),String(n.ip??''),String(n.status??'')])];
+  const ns='http://schemas.openxmlformats.org/';
+  return {count:rows.length-1,bytes:zip({
+   '[Content_Types].xml':`<Types xmlns="${ns}package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+   '_rels/.rels':`<Relationships xmlns="${ns}package/2006/relationships"><Relationship Id="rId1" Type="${ns}officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+   'xl/workbook.xml':`<workbook xmlns="${ns}spreadsheetml/2006/main" xmlns:r="${ns}officeDocument/2006/relationships"><sheets><sheet name="Kho số" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+   'xl/_rels/workbook.xml.rels':`<Relationships xmlns="${ns}package/2006/relationships"><Relationship Id="rId1" Type="${ns}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+   'xl/worksheets/sheet1.xml':sheet(rows)
+  })};
+ }
+ const api={records,workbook,inventoryWorkbook};if(typeof module!=='undefined')module.exports=api;else root.HistoryExport=api;
 })(globalThis);

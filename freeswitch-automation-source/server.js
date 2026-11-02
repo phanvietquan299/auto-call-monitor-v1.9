@@ -12,6 +12,7 @@ const session = require('express-session');
 const axios = require('axios');
 const { exec } = require('child_process'); // THƯ VIỆN ĐỂ CHẠY LỆNH REDIS-CLI
 
+const runtimeMode = require('./runtime-mode').createRuntimeMode();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -25,11 +26,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
+  name: process.env.SESSION_NAME || 'connect.sid',
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
+
+app.use(runtimeMode.middleware);
 
 // CẤU HÌNH TELEGRAM BOT
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -39,7 +43,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const SSH_KEY_PATH = process.env.SSH_KEY_PATH || '/root/.ssh/id_rsa';
 let cachedSshKey = null;
 try {
-  if (fs.existsSync(SSH_KEY_PATH)) {
+  if (!runtimeMode.readOnly && fs.existsSync(SSH_KEY_PATH)) {
     cachedSshKey = fs.readFileSync(SSH_KEY_PATH);
   }
 } catch (e) {
@@ -57,6 +61,7 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'Chưa đăng nhập!' });
 }
 
+app.get('/api/runtime', requireAuth, (req, res) => res.json({ readOnly: runtimeMode.readOnly }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // BẢNG CẤU HÌNH IN-MEMORY (ĐƯỢC NẠP TỪ DATABASE SQLITE KHI BOOT)
@@ -81,7 +86,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 5003;
 
-const db = new sqlite3.Database(path.join(__dirname, 'automation_dev.db'));
+const db = new sqlite3.Database(process.env.DB_PATH || path.join(__dirname, 'automation_dev.db'));
 
 // Promise hoá SQLite Helper
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
@@ -180,12 +185,17 @@ function loadConfigsFromDatabase() {
   });
 }
 
-setTimeout(() => {
-  console.log('[DB] Starting Dynamic Engine...');
-  initESLMonitors();
-}, 1000);
+if (!runtimeMode.readOnly) {
+  setTimeout(() => {
+    console.log('[DB] Starting Dynamic Engine...');
+    initESLMonitors();
+  }, 1000);
+} else {
+  console.log('[PREVIEW] Read-only: ESL, health polling and infrastructure writes disabled.');
+}
 
 function checkOpenSipsHealth(node) {
+  if (runtimeMode.readOnly) return;
   const url = `http://${node.host}:${node.port || 8888}/metrics/`;
   axios.get(url, {
     timeout: 3000,
@@ -207,6 +217,7 @@ function checkOpenSipsHealth(node) {
 }
 
 function initESLMonitors() {
+  if (runtimeMode.readOnly) return;
   db.all('SELECT * FROM nodes', [], (err, rows) => {
     if (err || !rows) return;
     rows.forEach(node => {
@@ -221,6 +232,7 @@ function initESLMonitors() {
 }
 
 function connectToNodeESL(node) {
+  if (runtimeMode.readOnly) return;
   if (eslSockets[node.id]) {
     try {
       eslSockets[node.id].removeAllListeners();
@@ -289,6 +301,7 @@ function connectToNodeESL(node) {
 // HÀM LÕI ĐẾM LỖI & KÍCH HOẠT AUTO SWAP (DÙNG CHUNG)
 // ==========================================
 function processErrorMetrics(nodeId, callerNumber, destinationNumber, cleanSipCode, setupTimeSec) {
+  if (runtimeMode.readOnly) return;
   const config = getConfigForNode(nodeId);
   const isBlockedSipCode = config.sipCodes.some(code => cleanSipCode.includes(code));
   const isImmediateFail = setupTimeSec <= config.maxSetupTimeSec;
@@ -387,6 +400,7 @@ function getHeaderValue(rawText, headerName) {
 }
 
 async function executeSwapOperation({ nodeId, phone, type = 'MANUAL', operator = 'System', reason = '' }) {
+  runtimeMode.assertWritable();
   const node = await dbGet('SELECT * FROM nodes WHERE id = ?', [nodeId]);
   if (!node) throw new Error(`Không tìm thấy node: ${nodeId}`);
   if (node.status === 'DISABLED') throw new Error(`Node ${nodeId} đang bị DISABLED.`);
@@ -506,6 +520,7 @@ app.post('/api/config/auto-swap', requireAuth, async (req, res) => {
 });
 
 function updateLuaFileViaSSH(nodeId, activePhone) {
+  if (runtimeMode.readOnly) return;
   db.get('SELECT host FROM nodes WHERE id = ?', [nodeId], (err, node) => {
     if (err || !node) return console.error(`[SSH ERROR] Không tìm thấy IP của Node ${nodeId}`);
 
@@ -1058,4 +1073,4 @@ app.get('/api/logs', requireAuth, (req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`[SERVER] Ready at http://localhost:${PORT}`));
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`[SERVER] Ready at http://localhost:${PORT}`));

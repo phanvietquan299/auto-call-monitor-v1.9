@@ -20,17 +20,15 @@
   function refreshTool(target){
     if(!['LOAD_BALANCER','CDR'].includes(target))return {ok:false};
     if(globalThis.fsSwitchBusy||globalThis.cdrReadBusy){pendingRefresh=target;return {ok:false,skipped:true,queued:true};}
-    const current=role(),docs=documents();
+    const docs=documents();
     const doc=docs.find(/** Tác dụng: Tìm phần tử đầu tiên khớp điều kiện trong refreshTool. */ d=>target==='CDR'?cdrForm(d):/\/loadbalancer\//i.test(d.URL||'')||[...d.querySelectorAll('table.ttable th')].some(/** Tác dụng: Kiểm tra có phần tử nào thỏa điều kiện trong refreshTool. */ h=>h.textContent.trim()==='SIP URI'))||docs.at(-1);
     if(!doc?.defaultView)return {ok:false,error:'Không tìm thấy trang công cụ để reload'};
     const fallback=target==='CDR'?'/cp/tools/system/cdrviewer/cdrviewer.php':'/cp/tools/system/loadbalancer/loadbalancer.php';
-    const url=new URL(doc.URL||fallback,location.origin);
-    if(url.origin!==location.origin)return {ok:false};
     pendingRefresh=null;
-    // Run now: background tabs throttle setTimeout, and Search could start
-    // before a delayed callback and cause every reload to be silently skipped.
-    if(current!==target||url.pathname.endsWith('/main.php'))doc.defaultView.location.replace(location.origin+fallback);
-    else doc.defaultView.location.reload();
+    // Explicit GET navigation also works when the current document came from a POST form.
+    // Never replay Save/Refresh form bodies through location.reload().
+    const destination=location.origin+fallback;
+    doc.defaultView.location.replace(destination);
     return {ok:true,role:target};
   }
   /** Tác dụng: Thực hiện yêu cầu refresh đã hoãn sau khi thao tác đang bận kết thúc. */

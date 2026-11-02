@@ -25,12 +25,14 @@
 
   let busy=false;
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
-    if(!['PHONE_IMPORT_INVENTORY','PHONE_IMPORT_ADD_BATCH'].includes(message.type))return;
+    if(!['PHONE_IMPORT_INVENTORY','PHONE_IMPORT_ADD_BATCH','PHONE_EXPORT_INVENTORY'].includes(message.type))return;
     if(sender.id!==chrome.runtime.id){reply({ok:false,error:'Nguồn yêu cầu không hợp lệ'});return;}
     if(busy){reply({ok:false,error:'Đang nạp số; chờ hoàn tất'});return;}
     busy=true;
     (async()=>{
-      const data=await inventory();await reconcile(data.numbers);
+      const data=await inventory();
+      if(message.type==='PHONE_EXPORT_INVENTORY')return {ok:true,...data};
+      await reconcile(data.numbers);
       if(message.type==='PHONE_IMPORT_INVENTORY')return {ok:true,...data};
       const batch=message.batch;PhoneImport.validateTarget(batch,data.nodes,await scope());
       const phones=PhoneImport.pending(batch,data.numbers);

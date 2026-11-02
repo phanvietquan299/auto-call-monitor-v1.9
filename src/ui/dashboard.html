@@ -153,6 +153,8 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
  dialog{max-height:calc(100dvh - 20px);padding:14px}
 }
 .node-picker-item{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}.node-picker-item input{width:20px;height:20px;margin-top:3px;flex-shrink:0}.node-picker-item small{display:block;color:var(--muted);margin-top:4px}.node-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.node-group-heading button{white-space:nowrap}
+.phone-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.phone-tools>div{min-width:0}.phone-tools>div+div{border-left:1px solid var(--line);padding-left:24px}@media(max-width:600px){.phone-tools{grid-template-columns:1fr;gap:16px}.phone-tools>div+div{border-left:0;border-top:1px solid var(--line);padding:16px 0 0}}
+.fs-switch-failure{border:1px solid #ffb454;background:#30263a;overflow-wrap:anywhere}.fs-switch-failure[hidden]{display:none}.fs-switch-failure p{white-space:pre-wrap;line-height:1.5}.fs-switch-failure button{min-height:44px;max-width:100%;white-space:normal}
 </style>
 </head>
 <body>
@@ -173,17 +175,23 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
         <button class="off" id="fs-switch-open">THAY FS: OFF</button>
         <label class="auto-mode-label">Chế độ Thay FS <select id="fs-switch-mode"><option value="MANUAL">Xác nhận tay</option><option value="AUTOMATIC">Tự động</option></select></label>
       </div>
-  <div class="fs-switch-inline"><div class="fs-threshold"><label for="fs-backup-threshold">Đổi FS khi BACKUP ≤</label><input id="fs-backup-threshold" type="number" min="0" step="1" value="10"><button id="fs-threshold-save" class="on">Lưu ngưỡng</button><span id="fs-threshold-status" role="status" class="muted"></span></div><div><b>Đặt lần locked tiếp theo</b><p class="muted" style="font-size:11px;margin:0">Chọn — để bỏ qua Tắt hoặc Bật. Chỉ bật: chờ một FS cùng nhóm locked.</p><div class="fs-preset-row"><b class="fs-preset-group">Collection</b><label>Tắt <select id="preset-source-99-153"><option value="">—</option></select></label><label>Bật <select id="preset-target-99-153"><option value="">—</option></select></label><button id="preset-save-99-153" class="fs-preset-save">Lưu</button><button id="preset-clear-99-153" class="fs-preset-clear">Hủy</button><span id="preset-status-99-153" class="fs-preset-status" role="status"></span></div><div class="fs-preset-row"><b class="fs-preset-group">Sale</b><label>Tắt <select id="preset-source-99-155"><option value="">—</option></select></label><label>Bật <select id="preset-target-99-155"><option value="">—</option></select></label><button id="preset-save-99-155" class="fs-preset-save">Lưu</button><button id="preset-clear-99-155" class="fs-preset-clear">Hủy</button><span id="preset-status-99-155" class="fs-preset-status" role="status"></span></div></div><div id="fs-switch-plans"></div><button id="fs-switch-release" class="secondary" hidden>Đã kiểm tra thủ công · mở khóa</button></div>
+  <div class="fs-switch-inline"><div class="fs-threshold"><label for="fs-backup-threshold">Đổi FS khi BACKUP ≤</label><input id="fs-backup-threshold" type="number" min="0" step="1" value="10"><button id="fs-threshold-save" class="on">Lưu ngưỡng</button><span id="fs-threshold-status" role="status" class="muted"></span></div><div><b>Đặt lần locked tiếp theo</b><p class="muted" style="font-size:11px;margin:0">Chọn — để bỏ qua Tắt hoặc Bật. Chỉ bật: chờ một FS cùng nhóm locked.</p><div class="fs-preset-row"><b class="fs-preset-group">Collection</b><label>Tắt <select id="preset-source-99-153"><option value="">—</option></select></label><label>Bật <select id="preset-target-99-153"><option value="">—</option></select></label><button id="preset-save-99-153" class="fs-preset-save">Lưu</button><button id="preset-clear-99-153" class="fs-preset-clear">Hủy</button><span id="preset-status-99-153" class="fs-preset-status" role="status"></span></div><div class="fs-preset-row"><b class="fs-preset-group">Sale</b><label>Tắt <select id="preset-source-99-155"><option value="">—</option></select></label><label>Bật <select id="preset-target-99-155"><option value="">—</option></select></label><button id="preset-save-99-155" class="fs-preset-save">Lưu</button><button id="preset-clear-99-155" class="fs-preset-clear">Hủy</button><span id="preset-status-99-155" class="fs-preset-status" role="status"></span></div></div><div id="fs-switch-plans"></div></div>
     </div>
   </div>
 </header>
 <main>
+  <section id="fs-switch-failure" class="card fs-switch-failure" role="alert" hidden>
+    <b id="fs-switch-failure-heading">THAY FS CHƯA HOÀN TẤT</b>
+    <p id="fs-switch-failure-detail"></p>
+    <p class="muted">Nếu đã xử lý tay trên OpenSIPS/FreeSWITCH, xác nhận bên dưới để mở khóa lượt lỗi. Thay FS sẽ chuyển OFF; bật lại khi sẵn sàng.</p>
+    <button id="fs-switch-release" class="secondary" hidden>Đã xử lý tay · mở khóa</button>
+  </section>
   <div id="summary"></div><button id="mobile-password-open" class="secondary">Mật khẩu app</button><div id="mobile-link-controls"><button id="create-mobile-link" class="secondary">Liên kết đăng nhập app điện thoại</button><span id="remote-sync-status" class="bad" role="status" style="display:block;font-size:12px;margin-top:6px"></span></div>
   <div id="confirmation-status" role="status" aria-live="polite"></div>
   <div id="confirmations"></div>
   <div class="card" id="fs-node-controls"><b>BẬT / TẮT FS</b><p class="muted">Xanh: đang hoạt động · Đỏ: đang tắt · Xám: chưa xác minh</p><div id="fs-node-buttons"></div></div>
   <div id="groups"></div>
-  <section class="card" id="phone-import-panel"><b>NẠP SỐ</b><p class="muted">Chọn COLL hoặc TLS, xem trước FS và số mới trước khi xác nhận nạp.</p><div id="phone-import-controls"></div></section>
+  <section class="card phone-tools" id="phone-import-panel"><div><b>NẠP SỐ</b><p class="muted">Chọn COLL hoặc TLS, xem trước FS và số mới trước khi xác nhận nạp.</p><div id="phone-import-controls"></div></div><div><b>XUẤT SỐ</b><p class="muted">Lấy toàn bộ số trên FreeSWITCH, gồm ACTIVE, BLOCKED và BACKUP của tất cả FS.</p><button id="phone-export" class="on" type="button">Xuất số</button><p id="phone-export-status" class="muted" role="status"></p></div></section>
 
 
   <div class="card"><b>THỐNG KÊ VÀ LỊCH SỬ · Supabase</b><div id="fs-switch-status" role="status"></div>
