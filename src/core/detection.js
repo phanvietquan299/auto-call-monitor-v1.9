@@ -9,7 +9,7 @@
     saleCooldownMs:30000,saleRecoverySamples:8,saleRecoveryStableMs:20000,
     saleRecoveryMinVt:0,saleRecoveryTrafficFloor:4,saleRecoveryRangeFloor:2,
     recoveryRangeRatio:0.35,recoveryTrafficFloor:50,recoveryStableMs:60000,recoveryDelayedMs:300000,backupBlockWaitMs:5000,rotationBackupGraceMs:30000,slowBaselineStableMs:60000,
-    workdayStartMinute:480,collectionDayEndMinute:1085,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
+    workdayStartMinute:480,collectionDayEndMinute:1110,saleDayEndMinute:1020,collectionPauseStartMinute:730,scheduledPauseStartMinute:700,scheduledHandoffMinute:700,scheduledPauseEndMinute:780};
   const median=/** Tác dụng: Tính trung vị các giá trị hữu hạn để giảm ảnh hưởng của mẫu VT nhiễu. */ values=>{const a=values.filter(Number.isFinite).slice().sort(/** Tác dụng: So sánh hai phần tử để xác định thứ tự ưu tiên trong median. */ (a,b)=>a-b);const i=Math.floor(a.length/2);return a.length?(a.length%2?a[i]:(a[i-1]+a[i])/2):null;};
   const keyOf=/** Tác dụng: Tạo khóa state duy nhất từ nhóm, tên FS và địa chỉ IP. */ a=>`${a.group}|${a.fs}|${a.ip}`;
   /** Tác dụng: Ghi sự kiện một lần theo sự cố/loại và giới hạn thời gian log hiển thị. */
@@ -28,26 +28,31 @@
   function transition(s,f,next,now,detail){if(f.state!==next){f.state=next;event(s,next,f,now,detail);}}
   // Vietnam uses UTC+7 throughout the year, independent of the host timezone.
   /** Tác dụng: Tính trạng thái làm việc, nghỉ trưa hoặc nghỉ đêm theo giờ Việt Nam và nhóm. */
+  function workHours(c=CONFIG,group='99.155'){
+    const saved=c.workHours?.[group];
+    if(saved&&Number.isInteger(saved.start)&&Number.isInteger(saved.end)&&saved.start>=0&&saved.start<saved.end&&saved.end<1440)return saved;
+    return {start:c.workdayStartMinute??480,end:group==='99.153'?CONFIG.collectionDayEndMinute:(c.saleDayEndMinute??1020)};
+  }
+  const clockText=minute=>`${String(Math.floor(minute/60)).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;
   function scheduleAt(now,c=CONFIG,group='99.155'){
     const local=new Date(now+7*60*60*1000),minute=local.getUTCHours()*60+local.getUTCMinutes();
     const date=local.toISOString().slice(0,10);
     const start=group==='99.153'?c.collectionPauseStartMinute:c.scheduledPauseStartMinute;
-    const eveningEnd=group==='99.153'?1085:(c.saleDayEndMinute??1020);
-    const earlyMorning=minute<(c.workdayStartMinute??480);
+    const hours=workHours(c,group),eveningEnd=hours.end;
+    const earlyMorning=minute<hours.start;
     const dayEnd=earlyMorning||minute>=eveningEnd;
     const nightDate=earlyMorning?new Date(local.getTime()-86400000).toISOString().slice(0,10):date;
     return {paused:dayEnd||minute>=start&&minute<c.scheduledPauseEndMinute,
-      startAt:dayEnd?(group==='99.153'?'18:05':'17:00'):group==='99.153'?'12:10':'11:40',
-      endAt:dayEnd?'08:00':'13:00',
+      startAt:dayEnd?clockText(eveningEnd):clockText(start),
+      endAt:dayEnd?clockText(hours.start):clockText(c.scheduledPauseEndMinute),
       phase:dayEnd?'DAY_END':group==='99.155'&&minute>=c.scheduledHandoffMinute?'HANDOFF':'LUNCH',
       cycle:dayEnd?`${nightDate}|DAY_END`:`${date}|${minute>=c.scheduledPauseEndMinute?'AFTER':'BEFORE'}`,
       pauseId:`${dayEnd?nightDate:date}|${dayEnd?'DAY_END':'LUNCH'}`};
   }
-  /** Tác dụng: Chặn cứng Collection từ 18:05 đến 08:00, độc lập snapshot hoặc cấu hình cũ. */
-  function collectionHardStop(group,now){
-    if(group!=='99.153')return false;
-    const local=new Date(now+25200000),minute=local.getUTCHours()*60+local.getUTCMinutes();
-    return minute>=1085||minute<480;
+  /** Chặn thao tác ngoài giờ đã lưu; không thay đổi routing khi kết thúc ngày. */
+  function collectionHardStop(group,now,c=CONFIG){
+    if(!['99.153','99.155'].includes(group))return false;
+    return scheduleAt(now,c,group).phase==='DAY_END'&&scheduleAt(now,c,group).paused;
   }
   const pausedFor=/** Tác dụng: Kiểm tra nhóm có đang bị tạm dừng theo lịch đã tính trong state không. */ (s,group)=>!!s.schedule?.groups?.[group]?.paused;
   /** Tác dụng: Giới hạn phạm vi quản lý theo IP đã tick; giữ lựa chọn mặc định trước lần lưu đầu tiên. */
@@ -103,7 +108,7 @@
         if(!entering&&!resuming&&!missed)continue;
         // The lunch-resume check is separate from normal activation/VT policy.
         const local=new Date(now+25200000),minute=local.getUTCHours()*60+local.getUTCMinutes();
-        if((resuming||missed)&&!current.paused&&minute>=c.scheduledPauseEndMinute&&minute<(group==='99.153'?c.collectionDayEndMinute:c.saleDayEndMinute)&&
+        if((resuming||missed)&&!current.paused&&minute>=c.scheduledPauseEndMinute&&minute<workHours(c,group).end&&
           cdrPrimary(s)&&c.cdrRequireVtDrop&&!f.incident?.actionPending&&!f.incident?.actionUncertain){
           resetBaseline(s,f,now,'13:00 resumed: checking fresh CDR twice');
           f.scheduledCdrAt=f.groupId===(group==='99.153'?2:3)?now:null;
@@ -288,7 +293,7 @@
   function os01CdrEvidence(s,f,now){
     const e=f.cdr?.decision,active=(s.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong os01CdrEvidence. */ n=>n.fs===f.fs&&n.profile===(f.group==='99.153'?'COLLECTION':'TELESALE')&&n.status==='ACTIVE');
     const after=Math.max(f.cdrEnabledAt||0,f.incident?.switchedAt||0,f.lastIncident?.switchedAt||0);
-    const available=s.monitoringEnabled&&!pausedFor(s,f.group)&&!collectionHardStop(f.group,now)&&isFsActive(s,f,now)&&
+    const available=s.monitoringEnabled&&!pausedFor(s,f.group)&&!collectionHardStop(f.group,now,s.config)&&isFsActive(s,f,now)&&
       now-f.updatedAt>=0&&now-f.updatedAt<=s.config.staleMs&&now-(s.freeswitch?.updatedAt||0)>=0&&now-(s.freeswitch?.updatedAt||0)<=s.config.staleMs&&
       active.length===1&&active[0].hasStatusControl;
     const fresh=!!(available&&e&&!e.error&&!e.observation&&e.group===f.group&&e.ip===f.ip&&e.phone===active[0].phone&&
@@ -810,6 +815,6 @@
     }
     refreshAlerts(s,now);
   }
-  const api={collectionHardStop,isNodeSelected,isNumberNodeSelected,applyNodeSelection,os01CdrPolicy,os01CdrEvidence,activationBlockReady,hybridVtReady,relearnHybridBaseline,pairedCdrProof,manualCdrProof,cdrVtDrop,cdrPrimary,updateCdrStates,preBlockRebounding,cdrGate,groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
+  const api={workHours,clockText,collectionHardStop,isNodeSelected,isNumberNodeSelected,applyNodeSelection,os01CdrPolicy,os01CdrEvidence,activationBlockReady,hybridVtReady,relearnHybridBaseline,pairedCdrProof,manualCdrProof,cdrVtDrop,cdrPrimary,updateCdrStates,preBlockRebounding,cdrGate,groupActionGate,groupCandidates,recordGroupAction,rotationBarriers,backupAssessment,backupReady,isFsActive,backupTargetValid,CONFIG,recoveryPolicy,scheduleAt,applySchedule,pausedFor,median,keyOf,event,transition,grafana,sample,refreshAlerts,recordManualSwap,observeManualSwaps};
   if(typeof module!=='undefined')module.exports=api;else root.Detection=api;
 })(globalThis);

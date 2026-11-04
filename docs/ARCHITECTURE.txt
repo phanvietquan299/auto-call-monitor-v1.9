@@ -98,3 +98,11 @@ XÁC NHẬN LỖI THAY FS (1.17.51)
 - FS_SWITCH_RELEASE yêu cầu đúng operationId FAILED/DONE; đặt enabled=false cùng lần lưu, xóa handled/quarantined chỉ của operation đó, lưu ACKNOWLEDGED + acknowledgedAt + MANUAL_RESOLUTION. Không sửa Group ID, không chạy lại kế hoạch cũ, không xóa preset mới.
 
 - 1.17.52: GET điều hướng/đọc danh sách dùng loadbalancer.php không có action; action=add chỉ giữ cho POST refresh=Refresh from Server theo form cũ, không điều hướng trình duyệt tới form Add New Destination.
+
+NẠP EXCEL TRỰC TIẾP TRÊN FS AUTOMATION
+- scripts/build-server-import.py đóng gói policy và UI hiện tại của tool sang freeswitch-automation-source/lib và public/js; không cần extension hoặc Supabase cho luồng này.
+- File XLSX được đọc cục bộ trong trình duyệt; chỉ gửi phone/publicIp của các sheet COLL/TLS đã tick. POST /api/numbers/import/preview lưu bảng pending 10 phút theo phiên; execute chỉ nhận previewId và fs.
+- lib/excel-import.js dùng SQLite connection riêng, BEGIN IMMEDIATE, kiểm tra lại mapping/ownership, INSERT BACKUP rồi đọc xác minh, lưu receipt cùng transaction. Lượt lặp dùng receipt, số đã tồn tại lúc preview không trở thành ứng viên nếu bị xóa sau đó.
+- Bản 5004 chỉ cho nạp Excel khi PREVIEW_ALLOW_IMPORT=1 và DB_PATH riêng đã cấu hình; các API đổi số, node, SSH/Redis, ESL vẫn bị chặn. Legacy upload-excel không còn ghi ngay, trả yêu cầu dùng bước xem trước mới.
+
+- Server Excel: số đã tồn tại ở bất kỳ FS/profile/status nào được tính đã có và bỏ qua; không chuyển node, không sửa trạng thái. Khi execute kiểm tra lại và chỉ xác minh những số thực sự được thêm trong transaction. Chính sách mapping/sheet giữ nguyên; extension không đổi điều kiện ownership trong lần sửa này.

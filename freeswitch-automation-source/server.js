@@ -3,7 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const multer = require('multer');
 const xlsx = require('xlsx');
 const net = require('net');
 const fs = require('fs');
@@ -14,7 +13,6 @@ const { exec } = require('child_process'); // THƯ VIỆN ĐỂ CHẠY LỆNH RE
 
 const runtimeMode = require('./runtime-mode').createRuntimeMode();
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
 app.set('etag', false);
 app.use((req, res, next) => {
@@ -22,6 +20,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use('/api/numbers/import', express.json({ limit: '300kb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -61,7 +60,7 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'Chưa đăng nhập!' });
 }
 
-app.get('/api/runtime', requireAuth, (req, res) => res.json({ readOnly: runtimeMode.readOnly }));
+app.get('/api/runtime', requireAuth, (req, res) => res.json({ readOnly: runtimeMode.readOnly, importAllowed: runtimeMode.importAllowed, deleteAllowed: runtimeMode.deleteAllowed }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // BẢNG CẤU HÌNH IN-MEMORY (ĐƯỢC NẠP TỪ DATABASE SQLITE KHI BOOT)
@@ -821,77 +820,89 @@ app.post('/api/numbers/add', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/numbers/upload-excel', requireAuth, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Chưa chọn file Excel!' });
+// Monitor inventory uses authenticated read APIs without opening the production filesystem.
+const monitorInventory = runtimeMode.readOnly && process.env.MONITOR_INVENTORY_URL === 'http://127.0.0.1:5003'
+  ? require('./lib/monitor-inventory').createMonitorInventory({
+      baseUrl: process.env.MONITOR_INVENTORY_URL,
+      accessFile: process.env.MONITOR_INVENTORY_ACCESS_FILE
+    }) : null;
+const monitorSelection = runtimeMode.readOnly && process.env.DB_PATH ? require('./lib/monitor-selection').createMonitorSelection({
+  file: path.join(path.dirname(process.env.DB_PATH), 'monitor-nodes.json'),
+  getNodes: () => dbAll('SELECT id,host,profile FROM nodes')
+}) : null;
+app.get('/api/monitor/nodes', requireAuth, async (_req, res) => {
+  if (!monitorSelection) return res.status(404).json({error:'Monitor chỉ có trên bản thử'});
+  try { res.json(await monitorSelection.catalog()); } catch (_) { res.status(503).json({error:'Không tải được danh sách node'}); }
+});
+app.post('/api/monitor/nodes', requireAuth, async (req, res) => {
+  if (!monitorSelection) return res.status(404).json({error:'Monitor chỉ có trên bản thử'});
+  const origin = req.get('Origin');
+  if (origin && origin !== req.protocol + '://' + req.get('Host')) return res.status(403).json({error:'Nguồn yêu cầu không hợp lệ'});
+  try { res.json(await monitorSelection.save(req.body)); } catch (error) { res.status(error.status || 400).json({error:error.message}); }
+});
+const monitorStatusConnection = new sqlite3.Database(process.env.DB_PATH || path.join(__dirname, 'automation_dev.db'));
+monitorStatusConnection.configure('busyTimeout', 5000);
+const monitorNumberStatus = require('./lib/monitor-number-status').createMonitorNumberStatus(monitorStatusConnection, {
+  sandbox: runtimeMode.readOnly,
+  getSelection: () => monitorSelection?.read() || {groups:{}},
+  notify: () => io.emit('number_swapped')
+});
+app.post('/api/monitor/number-status', requireAuth, async (req, res) => {
+  const origin = req.get('Origin');
+  if (origin && origin !== req.protocol + '://' + req.get('Host')) return res.status(403).json({error:'Nguồn yêu cầu không hợp lệ'});
+  try { res.json(await monitorNumberStatus.change(req.body, req.session.user)); } catch (error) { res.status(409).json({error:error.message}); }
+});
+// Live monitor is explicitly enabled only on the isolated preview instance.
+const liveMonitor = require('./lib/live-monitor').createLiveMonitor({
+  enabled: runtimeMode.readOnly && process.env.MONITOR_READ_ENABLED === '1',
+  getSelection: monitorSelection ? () => monitorSelection.read() : undefined,
+  getNodes: () => monitorInventory ? monitorInventory.read().then(result => result.nodes) : dbAll('SELECT id,host,profile FROM nodes'),
+  getInventory: monitorInventory ? () => monitorInventory.read() : undefined,
+  accessFile: process.env.MONITOR_ACCESS_FILE,
+  cookieDir: process.env.MONITOR_COOKIE_DIR
+});
+app.get('/api/monitor', requireAuth, async (_req, res) => {
+  try { res.json({...await liveMonitor.snapshot(),numberStatus:await monitorNumberStatus.snapshot()}); }
+  catch (_) { res.status(503).json({ error: 'Không tải được trạng thái Monitor' }); }
+});
+app.post('/api/monitor/control', requireAuth, async (req, res) => {
+  const origin = req.get('Origin');
+  if (origin && origin !== req.protocol + '://' + req.get('Host')) return res.status(403).json({error:'Nguồn yêu cầu không hợp lệ'});
+  try { const state=await monitorSelection.setEnabled(req.body);liveMonitor.reset();res.json(state); }
+  catch (error) { res.status(error.status || 400).json({error:error.message}); }
+});
+liveMonitor.start();
 
-  try {
-    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-    db.all('SELECT id, profile FROM nodes', [], (err, nodesList) => {
-      const nodeProfileMap = {};
-      if (nodesList) nodesList.forEach(n => nodeProfileMap[n.id] = n.profile);
-
-      const stmt = db.prepare('INSERT OR IGNORE INTO numbers (phone, node_id, profile, status) VALUES (?, ?, ?, "BACKUP")');
-      let importedCount = 0;
-
-      rows.forEach(row => {
-        const phone = String(row['SĐT'] || row['Phone'] || row['phone'] || row['SDT'] || '').trim();
-        const nodeId = String(row['Node'] || row['NODE'] || row['node_id'] || '').trim().toUpperCase();
-        let profile = String(row['Profile'] || row['PROFILE'] || row['profile'] || '').trim().toUpperCase();
-
-        if (!profile && nodeId) profile = nodeProfileMap[nodeId] || 'COLLECTION';
-
-        if (phone && nodeId) {
-          stmt.run(phone, nodeId, profile);
-          importedCount++;
-        }
-      });
-
-      stmt.finalize(() => {
-        io.emit('number_swapped');
-        res.json({ success: true, count: importedCount });
-      });
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Lỗi đọc file Excel: ' + err.message });
-  }
+// Dedicated SQLite connection keeps import transactions separate from unrelated API writes.
+const importConnection = new sqlite3.Database(process.env.DB_PATH || path.join(__dirname, 'automation_dev.db'));
+importConnection.configure('busyTimeout', 5000);
+const excelImport = require('./lib/excel-import').createExcelImport(importConnection, {
+  assertImportAllowed: runtimeMode.assertImportAllowed,
+  notify: () => io.emit('number_swapped')
+});
+for (const [route, type] of [['preview','PHONE_IMPORT_PREVIEW'],['execute','PHONE_IMPORT_EXECUTE']]) {
+  app.post('/api/numbers/import/' + route, requireAuth, async (req, res) => {
+    const origin = req.get('Origin');
+    if (origin && origin !== req.protocol + '://' + req.get('Host')) return res.status(403).json({ error: 'Nguồn yêu cầu không hợp lệ' });
+    if (!req.is('application/json')) return res.status(415).json({ error: 'Cần gửi dữ liệu JSON' });
+    const owner = require('crypto').createHash('sha256').update(req.sessionID).digest('hex');
+    try { res.json(await excelImport.handle(owner, { ...req.body, type })); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+}
+// Old clients cannot bypass the required sheet selection and preview step.
+app.post('/api/numbers/upload-excel', requireAuth, (_req, res) => {
+  res.status(409).json({ error: 'Nạp Excel đã đổi cơ chế: chọn COLL/TLS và xem trước trước khi xác nhận nạp.' });
 });
 
-app.post('/api/numbers/delete', requireAuth, (req, res) => {
-  const { phone } = req.body;
-  db.get('SELECT node_id FROM numbers WHERE phone = ?', [phone], (err, row) => {
-    const nodeId = row ? row.node_id : null;
-    db.run('DELETE FROM numbers WHERE phone = ?', [phone], function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      io.emit('number_swapped');
-      if (nodeId) checkAndSendLowBackupAlert(nodeId);
-      res.json({ success: true });
-    });
-  });
-});
-
-app.post('/api/numbers/bulk-delete', requireAuth, (req, res) => {
-  const { nodeId, status } = req.body;
-  let sql = 'DELETE FROM numbers WHERE 1=1';
-  const params = [];
-
-  if (nodeId && nodeId !== 'ALL') {
-    sql += ' AND node_id = ?';
-    params.push(nodeId);
-  }
-  if (status && status !== 'ALL') {
-    sql += ' AND status = ?';
-    params.push(status);
-  }
-
-  db.run(sql, params, function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    io.emit('number_swapped');
-    if (nodeId && nodeId !== 'ALL') checkAndSendLowBackupAlert(nodeId);
-    res.json({ success: true, deleted: this.changes });
-  });
+const deleteConnection = new sqlite3.Database(process.env.DB_PATH || path.join(__dirname, 'automation_dev.db'));
+deleteConnection.configure('busyTimeout', 5000);
+const numberDelete = require('./lib/number-delete').createNumberDelete(deleteConnection, { assertDeleteAllowed: runtimeMode.assertDeleteAllowed, notify: () => io.emit('number_swapped') });
+app.post('/api/numbers/delete-selected', requireAuth, async (req, res) => {
+  const origin = req.get('Origin');
+  if (origin && origin !== req.protocol + '://' + req.get('Host')) return res.status(403).json({ error: 'Nguồn yêu cầu không hợp lệ' });
+  try { res.json(await numberDelete.remove(req.body.ids)); }
+  catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 // CẬP NHẬT TRẠNG THÁI SỐ (HỖ TRỢ THAO TÁC THỦ CÔNG)

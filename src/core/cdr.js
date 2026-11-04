@@ -66,7 +66,7 @@
     if(calls.some(/** Tác dụng: Kiểm tra có phần tử nào thỏa điều kiện trong specialWarning. */ (r,i)=>i&&r.time>calls[i-1].time))return null;
     const first=calls[0];if(!first)return null;
     const pattern=`${first.sipCode}-${first.setupTime}-${first.duration}`;
-    if(!['480-30-0','408-30-0','487-32-0'].includes(pattern))return null;
+    if(!['480-30-0','408-30-0','480-10-0','487-32-0'].includes(pattern))return null;
     let count=0;for(const r of calls){if(`${r.sipCode}-${r.setupTime}-${r.duration}`!==pattern)break;count++;}
     return count>=threshold?{pattern,count,callIds:calls.slice(0,threshold).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong specialWarning. */ r=>r.callId)}:null;
   }

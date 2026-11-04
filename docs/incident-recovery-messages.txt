@@ -1,0 +1,330 @@
+INCIDENT / RECOVERY — CATALOGUE FROM CURRENT SOURCE
+5004 currently displays only: Chưa có dữ liệu giám sát.
+The extension column is a current status, not an append-only log. Dynamic error/reason values can contain additional messages.
+Below: exact UI priority expression and source excerpts which populate its fields. Dynamic values remain as source templates.
+
+src/ui/dashboard.js
+364:       const learningNote=routed&&s.schedule?.groups?.[g]?.paused?`Nhóm nghỉ theo lịch; xét lại VT/CDR từ ${esc(s.schedule.groups[g].resumeAt||s.schedule.groups[g].endAt||'13:00')}`:routed&&fs.scheduledCdrAt&&Date.now()-fs.scheduledCdrAt<=120000&&Math.max(fs.incident?.switchedAt||0,fs.lastIncident?.switchedAt||0)<fs.scheduledCdrAt&&!fs.incident?.autoExecuted&&!fs.incident?.manualExecuted?`Kiểm tra CDR mới sau 13:00 · ${fs.incident?.scheduledResume?fs.incident.cdrConfirmationReads||0:0}/2 lượt lỗi 5/5`:s.config?.cdrRequireVtDrop&&routed&&!fs.baseline?`Đang học baseline VT: ${(fs.healthyHistory||[]).length}/${s.config.baselineSamples||20} mẫu`:s.config?.detectionSource==='CDR'?(rawState==='WAITING_CDR'?'Chờ cuộc gọi CDR mới; không xử lý dữ liệu cũ':''):awaitingCdr?(fs.cdrStatus||'Chờ CDR 5 cuộc mới nhất 480-0-0 / 480-1-0'):rawState==='INACTIVE'&&routed?(s.schedule?.groups?.[g]?.paused?'Nhóm nghỉ theo lịch':
+365:         !s.monitoringEnabled?'MONITOR đang OFF':n.used>0?
+366:         `FS đang bật; học baseline ${fs.healthyHistory?.length||0}/${s.config.baselineSamples??20} mẫu`:'FS đang bật; chờ VT tăng'):
+367:         rawState==='INACTIVE'&&groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
+368:       const stateClass=!fsRoutingActive(s,n.fs,g==='99.153'?'COLLECTION':'TELESALE')?"muted":fs.state==="SUSPECTED"?"bad":fs.state==="HEALTHY"?"good":
+src/ui/dashboard.js
+379:       const remaining=switched?Math.max(0,Math.ceil((cooldownMs-(Date.now()-switched))/1000)):0;
+380:       const queued=fs.state==='SUSPECTED'&&s.autoEnabled&&s.autoBlockMode==='AUTOMATIC'&&fs.autoQueueUntil>Date.now();
+381:       const routingNote=n.groupId===0?'':fs.groupId==null?'Chưa đọc được Group ID; không BLOCK':'';
+382:       const os01Note=g==='99.153'&&n.fs==='OS01'&&n.ip==='10.10.99.140'&&!s.schedule?.groups?.[g]?.paused?fs.detectionNote||'OS01: chờ 2 lượt Search liên tiếp lỗi 5/5; không yêu cầu VT tụt':'';
+383:       const status=(n.displayOnly?'Chỉ hiển thị; chưa có cấu hình xử lý cho destination này':'')||(!s.monitoringEnabled?'MONITOR đang OFF; không tự đổi số':'')||s.processingStatus?.[`${g}|${n.fs}|${n.ip}`]||os01Note||learningNote||routingNote||(fs.incident?.actionPending?'Đang chuyển ACTIVE → BLOCKED; chưa hoàn tất':'')||fs.actionError||(queued?`Chờ lượt AUTO · ${Math.ceil((fs.autoQueueUntil-Date.now())/1000)}s`:'')||fs.incident?.actionUncertain&&'Swap result unknown; check manually'||
+384:         (fs.state==='COOLDOWN'?`Locked · ${remaining}s`:fs.state==='RECOVERING'?`Locked · ${fs.recoveryNote||'Chờ CDR mới sau khi đổi số'}`:['WATCHING','WARNING','SUSPECTED'].includes(fs.state)?fs.detectionNote||'':'')||fs.detectionNote||fs.cdrStatus||(routed?'Chờ đủ điều kiện VT và CDR để xử lý':'FS không hoạt động trong nhóm; không tự đổi số');
+385:       const cdr=fs.cdr;
+src/ui/dashboard.js
+397:       groups+=`<tr><td data-label="FS">${esc(n.fs||"Chưa ghép tên")} (${backupCount??'—'})${n.displayOnly?'':manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
+398:     }
+
+src/core/cdr.js
+28:       if(r.ip!==ip||r.method!=='INVITE')continue;
+29:       if((!observation&&!Number.isFinite(r.time))||!r.callId)return {locked:false,count:0,reason:'CDR thiếu thời gian hoặc Call ID hợp lệ'};
+30:       if(!observation&&r.time>now+2000)return {locked:false,count:0,reason:'Thời gian CDR lệch về tương lai'};
+31:       if(seen.has(r.callId))continue;seen.add(r.callId);
+32:       if(!observation&&(r.time<=after||r.time<now-30000||used.has(r.callId)))continue;
+35:     // Preserve server order within the same second. Reject reversed order.
+36:     if(!observation&&calls.some(/** Tác dụng: Kiểm tra có phần tử nào thỏa điều kiện trong evaluate. */ (r,i)=>i&&r.time>calls[i-1].time))return {locked:false,count:0,reason:'CDR không theo thứ tự mới nhất trước'};
+37:     let count=0,hasZeroSetup=false;
+38:     for(const r of calls){
+43:     return {eligibleCount:calls.length,newestCallTime:calls[0]?.time||0,hasZeroSetup,observation,locked:count>=5,count:Math.min(count,5),consecutiveTotal:count,callIds:calls.slice(0,Math.min(count,5)).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong evaluate. */ r=>r.callId),
+44:       reason:count>=5?'5 cuộc mới nhất liên tiếp 480-0-0 hoặc 480-1-0':`CDR ${count}/5 cuộc liên tiếp 480-0-0 / 480-1-0`};
+45:   }
+46:   // Counts observed CDRs by their server timestamp, not by Search response time.
+
+src/core/detection.js
+78:         f.incident=null;f.candidateId=null;f.cdr=null;f.activeBeforeIncident=false;
+79:         f.state=selected?'LEARNING':'UNMANAGED';f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+80:       }
+81:       f.detectionNote=selected?'Đã chọn lại node; chờ VT/CDR mới':'Node không được chọn; tool không can thiệp';
+82:     }
+83:     s.pendingAutoActions=(s.pendingAutoActions||[]).filter(a=>a.group!==group||ips.includes(a.ip||s.fsStates?.[a.key]?.ip));
+236:     const c=s.config,e=f.cdr?.decision;
+237:     f.baselineRelearnNote=null;
+238:     if(!c.cdrRequireVtDrop||!f.baseline||!f.vtDeclineAt)return;
+239:     if(f.incident){f.baselineRelearnNote='Giữ baseline khi sự cố đang chờ xử lý/phục hồi';return;}
+240:     if(!e||e.error||!e.eligibleCount||now-e.checkedAt<0||now-e.checkedAt>15000){f.baselineRelearnNote='Chưa học lại: cần CDR mới đọc được';return;}
+241:     if(e.locked||pairedCdrProof(s,f,now)){f.baselineRelearnNote='Giữ baseline: CDR đang có bằng chứng 5/5';return;}
+242:     const profile=f.group==='99.153'?'COLLECTION':'TELESALE';
+243:     const active=(s.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong relearnHybridBaseline. */ n=>n.fs===f.fs&&n.profile===profile&&n.status==='ACTIVE');
+244:     if(active.length!==1||active[0].phone!==e.phone){f.baselineRelearnNote='Chưa học lại: cần CDR đúng số ACTIVE';return;}
+245:     const wait=Math.max(0,c.maxCollapseMs-(now-f.vtDeclineAt));
+246:     if(now-f.vtDeclineAt<=c.maxCollapseMs){f.baselineRelearnNote=`Học lại mức thấp điểm sau ${Math.ceil(wait/1000)}s nếu VT ổn định và CDR không lỗi`;return;}
+247:     const points=f.history.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong relearnHybridBaseline. */ x=>x.time>=now-c.slowBaselineStableMs),values=points.map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong relearnHybridBaseline. */ x=>x.vt),m=median(values);
+248:     if(points.length<c.baselineSamples||points[0].time>now-c.slowBaselineStableMs+c.sampleIntervalMs){f.baselineRelearnNote='Chờ đủ cửa sổ VT ổn định 60s để học lại';return;}
+249:     if(Math.min(...values)<=c.activeVtMin){f.baselineRelearnNote='Giữ baseline: VT quá thấp, chưa xác nhận mức thấp điểm';return;}
+250:     if(Math.max(...values)-Math.min(...values)>m*c.recoveryRangeRatio){f.baselineRelearnNote='Chờ VT bớt dao động để học lại baseline';return;}
+251:     f.baseline=m;f.baselineVt=m;f.healthyHistory=values.slice(-c.baselineSamples);f.vtDeclineAt=null;f.vtDropAt=null;f.pairedCdrProof=null;
+252:     f.baselineRelearnNote='Đã học lại baseline theo mức VT thấp ổn định';
+253:     f.detectionNote='VT thấp ổn định và CDR không xác nhận block; đã học lại baseline thấp điểm';
+254:   }
+255:   /** Tác dụng: Chọn trạng thái quan sát kết hợp VT/CDR và tạo lý do chưa đủ điều kiện xử lý. */
+257:     if(!s.config?.cdrRequireVtDrop)return e?'HEALTHY':'WAITING_CDR';
+258:     if(!Number.isFinite(f.currentVt)||now-f.updatedAt<0||now-f.updatedAt>s.config.staleMs){f.detectionNote='Chờ VT mới; chưa đánh giá kết hợp';return 'WAITING_VT';}
+259:     const fallbackNote=e?.locked&&f.cdrFailureRun?.count?`CDR dự phòng: ${f.cdrFailureRun.count}/3 lượt Search liên tiếp lỗi 5/5; đủ 3 lượt sẽ xử lý không phụ thuộc VT`:null;
+260:     if(!Number.isFinite(f.baseline)||f.baseline<=0){f.detectionNote=fallbackNote||'Đang học baseline VT trước khi đánh giá kết hợp';return 'LEARNING';}
+261:     const ratio=f.currentVt/f.baseline;
+262:     if(ratio<=s.config.warningRatio){f.detectionNote=fallbackNote||(e?'VT giảm mạnh; CDR chưa đủ 5/5 để kết luận nghi block':'VT giảm mạnh; chờ CDR mới để xác minh');return 'WARNING';}
+263:     if(e?.locked){f.detectionNote=fallbackNote||'CDR đã đủ 5/5 nhưng VT chưa tới ngưỡng; tiếp tục theo dõi';return 'WARNING';}
+264:     if(ratio<=s.config.watchRatio){f.detectionNote='VT đang giảm; theo dõi kết hợp CDR';return 'WATCHING';}
+265:     if(!e){f.detectionNote='VT chưa giảm mạnh; chờ CDR mới để xác minh';return 'WAITING_CDR';}
+266:     f.detectionNote=null;return 'HEALTHY';
+267:   }
+268:   /** Tác dụng: Kiểm tra bằng chứng CDR đã ghép với VT còn mới và vẫn đúng số ACTIVE. */
+318:     if(i?.actionPending||i?.actionUncertain||i?.locked&&!i.autoExecuted&&!i.manualExecuted){
+319:       f.detectionNote=i.actionPending?`${f.fs}: đang đổi số; chờ xác minh`:`${f.fs}: kết quả đổi số chưa xác minh; không tự gửi lại`;return;
+320:     }
+321:     const handled=i?.autoExecuted||i?.manualExecuted;
+325:       if(!i?.locked)f.state=isFsActive(s,f,now)?'WAITING_CDR':'INACTIVE';
+326:       f.detectionNote=`${label}: chờ dữ liệu mới, Group ID đang bật và đúng một số ACTIVE`;return;
+327:     }
+328:     if(handled){
+331:         f.lastIncident={...i,closed:true,closedAt:now};f.incident=null;f.candidateId=null;f.pairedCdrProof=null;
+332:         f.state='HEALTHY';f.detectionNote=`${label}: CDR mới đã hết chuỗi lỗi sau đổi số`;return;
+333:       }
+334:       if(!proof.bad||run.count<limit||now-i.switchedAt<(s.config.backupBlockWaitMs??5000)||phone===i.oldPhone){
+335:         f.detectionNote=`${label}: chờ CDR của số mới sau đổi · ${run.count}/${limit} lượt lỗi 5/5`;return;
+336:       }
+337:       f.lastIncident=i;f.incident=null;
+343:       f.state=proof.bad?'WARNING':proof.fresh?'HEALTHY':'WAITING_CDR';
+344:       f.detectionNote=`${label}: ${run.count}/${limit} lượt Search liên tiếp lỗi 5/5; không yêu cầu VT tụt`;return;
+345:     }
+346:     const rejected=i?.cancelled?i:f.lastIncident?.cancelled?f.lastIncident:null;
+351:         ...(backup?{isBackup:true,...backup}:{})};
+352:       f.cdrBackup=null;f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+353:     }
+354:     const current=f.incident;if(os01CdrPolicy(f))current.os01CdrOnly=true;else current.cdrThreeSearch=true;current.cdrConfirmationReads=run.count;
+357:     e.incidentId=current.id;f.cdr.incidentId=current.id;f.pairedCdrProof=null;
+358:     f.detectionNote=`${label}: đã xác nhận ${limit} lượt Search liên tiếp lỗi 5/5; xử lý dù VT không tụt`;
+359:   }
+360:   /** Tác dụng: Cập nhật sự cố CDR, bằng chứng kết hợp, phục hồi và nhu cầu dùng số dự phòng. */
+367:         f.lastIncident={...old,cancelled:true,closed:true,closedAt:now};
+368:         f.incident=null;f.candidateId=null;f.pairedCdrProof=null;f.detectionNote=null;
+369:         f.state='WAITING_CDR';
+370:         s.pendingAutoActions=(s.pendingAutoActions||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong updateCdrStates. */ a=>a.incidentId!==old.id);
+444:         }
+445:         e.incidentId=i.id;f.cdr.incidentId=i.id;f.activeBeforeIncident=true;f.state='SUSPECTED';f.detectionNote=i.scheduledResume?`Sau 13:00: CDR mới lỗi 5/5 · xác nhận ${i.cdrConfirmationReads||0}/2 lượt`:i.postSwapCdrFailure?'CDR mới vẫn lỗi 5/5 sau lần đổi số; tiếp tục BLOCK dự phòng':'VT đã tới ngưỡng và CDR đủ 5/5; nghi block được xác nhận bởi cả hai tín hiệu';
+446:         if(s.config.cdrRequireVtDrop&&s.autoBlockMode==='MANUAL'&&s.autoEnabled&&(!i.scheduledResume||i.cdrConfirmationReads>=2)&&(now-e.checkedAt<=10000||pairedCdrProof(s,f,now)))i.manualCdrProof={...e,callIds:[...(e.callIds||[])]};
+447:       }else{
+454:   function cdrGate(s,f,now){
+455:     if(!isNodeSelected(s,f))return {ready:false,reason:'Node không được chọn monitor; không can thiệp'};
+456:     if(cdrPrimary(s)&&(os01CdrPolicy(f)||f.incident?.cdrThreeSearch)){
+457:       const proof=os01CdrEvidence(s,f,now),special=os01CdrPolicy(f),limit=special?2:3,run=special?f.os01CdrRun:f.cdrFailureRun,i=f.incident;
+459:         (special?i?.os01CdrOnly:i?.cdrThreeSearch)&&!i.locked&&!i.cancelled&&!i.actionPending&&!i.actionUncertain&&i.oldPhone===proof.phone&&proof.e.incidentId===i.id);
+460:       return {ready,reason:i?.actionPending?'OS01: đang đổi số; chờ xác minh':i?.actionUncertain?'OS01: kết quả đổi số chưa xác minh; kiểm tra FreeSWITCH':ready?`${f.fs}: ${limit} lượt Search lỗi 5/5; không yêu cầu VT tụt`:`${f.fs}: chờ ${limit} lượt Search liên tiếp lỗi 5/5 (${run?.count||0}/${limit})`};
+461:     }
+462:     if(f.incident?.lowVtFallback)return {ready:false,reason:'Đã bỏ cơ chế VT < 10; chờ đánh giá VT kết hợp CDR mới'};
+463:     if(!cdrPrimary(s)&&s.config?.cdrVerificationEnabled!==true)return {ready:true};
+464:     const held=cdrPrimary(s)?manualCdrProof(s,f):null;
+469:     const confirmed=!cdrPrimary(s)||held||(!needsResumeReads&&s.config?.cdrRequireVtDrop)||(f.incident?.cdrConfirmationReads||0)>=2;
+470:     if(cdrPrimary(s)&&(!held||f.incident?.isBackup)&&!hybridVtReady(s,f,now))return {ready:false,reason:'Chờ VT tụt theo baseline và CDR đủ 5/5'};
+471:     const ready=!!(confirmed&&(held||activationBlockReady(s,f,now)||f.incident?.noVtGrowth||f.incident?.postSwapCdrFailure||!s.config?.cdrRequireVtDrop||(paired||e?.checkedAt>=(f.vtDropAt||0)))&&e?.locked&&!e.observation&&e.count===5&&e.incidentId===f.incident?.id&&e.group===f.group&&e.ip===f.ip&&
+472:       (held||paired||now-e.checkedAt>=0&&now-e.checkedAt<=10000)&&active.length===1&&e.phone===active[0].phone);
+473:     if(!confirmed)return {ready:false,reason:'SUSPECTED: chờ lượt đọc CDR kế tiếp vẫn đủ 5 cuộc liên tiếp'};
+474:     return {ready,reason:held&&ready?'Đã ghi nhận CDR 5/5; chờ bạn xác nhận khi VT vẫn thấp':ready?'CDR xác nhận 5 cuộc liên tiếp 480-0-0 / 480-1-0':f.cdrStatus||'Chờ CDR xác nhận 5 cuộc mới nhất liên tiếp 480-0-0 / 480-1-0'};
+475:   }
+476:   /** Tác dụng: Xếp các FS đủ điều kiện xử lý trong nhóm theo chính sách ưu tiên hiện hành. */
+491:   function groupActionGate(s,f,now){
+492:     if(!isNodeSelected(s,f))return {ready:false,reason:'Node không được chọn monitor; không can thiệp'};
+493:     const cdr=cdrGate(s,f,now);if(!cdr.ready)return cdr;
+494:     if(cdrPrimary(s))return {ready:true};
+495:     if(preBlockRebounding(s,f))return {ready:false,reason:'VT đang tăng qua nhiều mẫu trước xử lý; tiếp tục theo dõi, chưa đổi số'};
+496:     if(f.state==='SUSPECTED'&&!f.incident?.locked&&Number.isFinite(f.currentVt)&&f.currentVt>f.baseline*s.config.suspectRatio)
+497:       return {ready:false,reason:'VT hiện tại đã vượt ngưỡng nghi block; chờ mẫu mới, chưa đổi số'};
+498:     if(!groupScope[f.group]?.includes(f.fs))return {ready:true};
+499:     const trial=s.groupTrials?.[f.group];
+500:     if(trial){
+501:       if(now<trial.until)return {ready:false,reason:`Chờ đánh giá VT nhóm sau ${trial.fs}: ${Math.ceil((trial.until-now)/1000)}s`};
+502:       if(trial.peers?.[f.key]!=null&&f.history.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong groupActionGate. */ x=>x.time>trial.completedAt).length<2)
+503:         return {ready:false,reason:'Chờ ít nhất 2 mẫu VT mới sau lượt xử lý nhóm'};
+504:       if(!f.incident?.isBackup&&groupRebounding(s,f,now))
+505:         return {ready:false,reason:'VT đã tăng sau xử lý FS khác; theo dõi hồi phục, chưa đổi số'};
+506:     }
+507:     const candidates=groupCandidates(s,f.group,now);
+508:     if(f.incident?.isBackup&&candidates.length)return {ready:false,reason:'Xử lý FS nghi block chưa đổi số trước lượt BLOCK dự phòng'};
+509:     if(!f.incident?.isBackup&&candidates.length&&candidates[0].key!==f.key)
+510:       return {ready:false,reason:`Ưu tiên ${candidates[0].fs}: VT thấp nhất/xu hướng giảm`};
+511:     return {ready:true};
+512:   }
+535:     const i=f.incident,c=s.config,assessment=backupAssessment(s,f,now);
+536:     if(assessment.waiting){f.recoveryNote="Đang chờ thay FS hoàn tất và mẫu VT mới sau khi ổn định tải";return false;}
+537:     // Evaluate the replacement's own samples, excluding traffic from the old phone.
+538:     recovery=f.history.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong prepareBackup. */ x=>x.time>=Math.max(switched,i.backupActiveSince||switched,assessment.after+1)).slice(-policy.samples).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong prepareBackup. */ x=>x.vt);
+557:       locked:false,autoExecuted:false,actionCount:0};
+558:     f.candidateId=f.incident.id;f.switchedAt=null;f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+559:     f.recoveryNote=null;f.detectionNote='BLOCK dự phòng (lần 2/2): VT chưa hồi phục';
+560:     transition(s,f,'SUSPECTED',now,f.detectionNote);event(s,'BACKUP_REQUIRED',f,now,f.detectionNote);
+561:     return true;
+610:           }
+611:           else {f.vtDeclineAt=null;f.pairedCdrProof=null;f.baselineRelearnNote=null;}
+612:           if(cdrVtDrop(s,f,now))f.vtDropAt=f.vtDropAt||now;else f.vtDropAt=null;
+613:         }
+618:         const a=backupAssessment(s,f,now);
+619:         if(a.waiting){f.recoveryNote='Chờ nhóm thay FS xong và ổn định tải trước khi BLOCK dự phòng';continue;}
+620:         const values=f.history.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong sample. */ x=>x.time>a.after).slice(-recoveryPolicy(group,c).samples).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong sample. */ x=>x.vt);
+621:         if(recoveryStable(s,f,values)){
+623:           f.incident=null;f.candidateId=null;f.baseline=median(values);f.baselineVt=f.baseline;
+624:           f.healthyHistory=values;f.severeWindows=0;f.recoveryNote=null;
+625:           transition(s,f,'HEALTHY',now,'Recovered after FS rotation; backup cancelled');continue;
+626:         }
+662:           }else f.incident.stableSince=null;
+663:           f.recoveryNote=stable?`Traffic stable; ${Math.max(0,Math.ceil((policy.stableMs-(now-f.incident.stableSince))/1000))}s before new baseline`:
+664:             recovery.length<policy.samples?'Waiting for fresh recovery samples':`Waiting for stable VT; median >= ${floor}, all samples > ${minVt}`;
+665:           if(f.state==='RECOVERING'&&stable&&now-f.incident.stableSince>=policy.stableMs){f.baseline=m;f.baselineVt=m;f.healthyHistory=recovery.slice();
+666:             f.incident.locked=false;f.incident.closed=true;f.incident.closedAt=now;
+667:             transition(s,f,'HEALTHY',now,'Recovered; new baseline learned');f.lastIncident=f.incident;f.incident=null;f.candidateId=null;f.severeWindows=0;f.recoveryNote=null;
+668:           }else if(!stable&&prepareBackup(s,f,now,switched,recovery,policy)){}
+669:           else if(now-switched>=c.recoveryDelayedMs)event(s,'RECOVERY_DELAYED',f,now,'Traffic has not recovered; AUTO remains locked');
+723:         if(['SUSPECTED','WATCHING'].includes(f.state))transition(s,f,'WARNING',now,'VT đang hồi trước AUTO BLOCK; giữ baseline cũ');
+724:         f.detectionNote='VT đang tăng qua nhiều mẫu; chưa đổi số, tiếp tục theo dõi';
+725:         continue;
+726:       }
+728:       f.severeWindows=ratio<=c.suspectRatio&&lows>=c.minLowSamples?(f.severeWindows||0)+1:0;
+729:       f.detectionNote=f.state==='SUSPECTED'?'Sustained VT collapse; check number status':now-f.startedAt>c.maxCollapseMs?'Slow decline: manual review required':'Confirming sustained VT collapse';
+730:       if(f.state==='WATCHING'&&ratio<=c.warningRatio)transition(s,f,'WARNING',now);
+731:       if(f.state==='WARNING'&&f.activeBeforeIncident&&f.severeWindows>=c.suspectWindows&&now-f.startedAt<=c.maxCollapseMs){
+732:         f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+733:         f.incident={id:f.candidateId,baseline:f.baseline,startedAt:f.startedAt,locked:false,autoExecuted:false,actionCount:0};
+734:         const profile=group==='99.153'?'COLLECTION':'TELESALE';
+767:       recentMedian:null,dropPercent:null,incident:null,candidateId:null,severeWindows:0,
+768:       startedAt:null,switchedAt:null,activeBeforeIncident:false,actionError:null,autoValidationFailures:0,autoRetryAfter:null,detectionNote:detail});
+769:   }
+770:   /** Tác dụng: Đối chiếu inventory số mới/cũ để nhận diện số ACTIVE đổi ngoài luồng thao tác của tool. */
+783:         f.incident.manualExecuted=true;f.incident.switchedAt=now;f.switchedAt=now;
+784:         f.actionError=null;
+785:         transition(s,f,'COOLDOWN',now,'Matching phone observed BLOCKED on FreeSWITCH');
+786:         event(s,'BLOCKED_OBSERVED',f,now,`${oldPhone} BLOCKED observed; recovery starts`);
+
+src/core/fs-switch.js
+64:         let reason;
+65:         if(node&&detection&&!detection.isNodeSelected(state,{group,ip:node.ip}))reason='Node không được chọn monitor; không can thiệp.';
+66:         else if(!feature.enabled)reason='THAY FS đang OFF; bật tính năng trước.';
+67:         else if(!state.monitoringEnabled)reason='MONITOR đang OFF.';
+68:         else if(state.schedule?.groups?.[group]?.paused)reason='Nhóm đang nghỉ theo lịch.';
+69:         else if(['FAILED','RUNNING'].includes(feature.operation?.status))reason=feature.operation.status==='FAILED'?'Lượt chuyển trước bị lỗi; kiểm tra và mở khóa trước khi chạy tiếp.':'Đang có lượt chuyển FS.';
+70:         else if(!fresh(state.opensips?.[group]?.updatedAt,now))reason='Dữ liệu OpenSIPS chưa có hoặc quá 45 giây; kiểm tra tab OpenSIPS.';
+71:         else if(!fresh(state.freeswitch?.updatedAt,now))reason='Dữ liệu FreeSWITCH chưa có hoặc quá 45 giây; kiểm tra tab FreeSWITCH.';
+72:         else if(!node||!Number.isInteger(node.destinationId)||node.destinationId<=0||node.groupId==null)reason='Chưa đọc được destination ID / Group ID; refresh tab OpenSIPS.';
+73:         else if(node.groupId!==p.groupId)reason=`FS chưa chạy trong nhóm này (Group ID ${node.groupId}; cần ${p.groupId}).`;
+74:         else if(state.fsTestExclusions?.[`${group}|${fs}`])reason='FS còn nằm trong khóa test OpenSIPS; trả về Group ID 0 bằng test tắt trước.';
+75:         else if(!f||!fresh(f.updatedAt,now))reason='Chưa có VT mới để đánh giá sự cố.';
+76:         else if(!plan&&feature.nextSwitch?.[group])reason=`Đặt trước ${feature.nextSwitch[group].source} → ${feature.nextSwitch[group].target}: chờ nguồn locked, đích Group ID 0 và dữ liệu hợp lệ.`;
+77:         else if(count==null)reason='Số BACKUP tổng quan đã cũ; chờ FreeSWITCH cập nhật.';
+78:         else if(count>threshold(feature)&&!plan)reason=`BACKUP ${count} > ngưỡng ${threshold(feature)}.`;
+79:         else if(f.state!=='SUSPECTED')reason=`BACKUP đã ≤ ${threshold(feature)}, nhưng trạng thái ${f.state}; chỉ thay tại lượt nghi block.`;
+80:         else if(!f.incident||f.incident.locked||f.incident.cancelled)reason='Sự cố đã xử lý/đang khóa hoặc đã hủy; không chuyển lại.';
+81:         else if(feature.quarantined?.[`${group}|${fs}`]||feature.handled?.[`${group}|${fs}|${f.incident.id}`])reason='FS/sự cố còn khóa từ lượt chuyển trước.';
+82:         else if(rows.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong diagnostics. */ n=>n.status==='ACTIVE').length!==1)reason='FS nguồn không có đúng một số ACTIVE.';
+83:         else if(!plan){
+84:           const details=p.fs.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong diagnostics. */ other=>other!==fs).map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong diagnostics. */ other=>{
+92:           });
+93:           reason='Không có FS đích đủ điều kiện. '+details.join('; ');
+94:         }else reason=feature.mode==='AUTOMATIC'?`Đủ điều kiện → ${plan.target.fs}; chờ lượt tự động.`:`Đủ điều kiện → ${plan.target.fs}; bấm Kiểm tra và xác nhận.`;
+95:         out.push({group,fs,backups:count,groupId:node?.groupId??null,state:f?.state||'CHƯA CÓ DỮ LIỆU',eligible:!!plan,reason});
+96:       }
+
+src/background/background.js
+74:     const f=state.fsStates?.[`${group}|${n.fs}|${n.ip}`];
+75:     if(f){f.groupId=null;f.detectionNote='Nhiều destination cùng IP/Group ID; chưa xác định được node để xử lý';}
+76:     return false;
+77:   });
+180:     if(f.state!=='SUSPECTED')continue;
+181:     let reason='';
+182:     if(!state.monitoringEnabled)reason='MONITOR đang OFF.';
+183:     else if(Detection.pausedFor(state,f.group))reason='Nhóm đang nghỉ theo lịch.';
+184:     else if(state.fsTestExclusions?.[`${f.group}|${f.fs}`])reason='FS còn khóa test OpenSIPS; không BLOCK số đang test.';
+185:     else if(f.groupId==null)reason='Chưa đọc được Group ID; refresh tab OpenSIPS.';
+186:     else if(f.groupId!==(f.group==='99.153'?2:3))reason='Group ID không thuộc nhóm đang chạy; không BLOCK.';
+187:     else if(!Detection.isFsActive(state,f,now))reason='Group ID đã quá 45 giây chưa cập nhật; kiểm tra tab OpenSIPS.';
+188:     else if(now-f.updatedAt>state.config.staleMs)reason='Group ID đã cũ; chờ dữ liệu OpenSIPS mới.';
+189:     else if(!Detection.groupActionGate(state,f,now).ready)reason=Detection.groupActionGate(state,f,now).reason;
+190:     else if(!Detection.backupReady(state,f,now))reason='BLOCK dự phòng đang chờ nhóm thay FS hoàn tất và bằng chứng mới.';
+191:     else if(rotationHeld(state,feature,f)){
+192:       const reserved=feature.quarantined?.[`${f.group}|${f.fs}`];
+193:       reason=reserved?'FS đang khóa trong lượt Thay FS; xem bước/lỗi trên trang THAY FS.':
+194:         feature.mode==='MANUAL'?'BACKUP ≤ ngưỡng: chờ xác nhận THAY FS. Mở nút THAY FS → Kiểm tra và xác nhận.':
+195:         'BACKUP ≤ ngưỡng: chờ lượt THAY FS tự động.';
+196:       if(f.rotationError)reason+=' '+f.rotationError;
+197:     }else if(f.incident?.autoExecuted)reason='Đã xác nhận BLOCKED; chờ đồng bộ phục hồi.';
+198:     else if(f.incident?.locked)reason=f.incident.actionPending?'Đang chuyển trạng thái, chưa hoàn tất.':f.actionError||'Kết quả BLOCK chưa xác minh; kiểm tra FreeSWITCH.';
+199:     else reason=f.actionError||(!state.autoEnabled?'AUTO BLOCK đang OFF.':state.autoBlockMode==='AUTOMATIC'?'Đang chờ lượt AUTO BLOCK.':'Chờ xác nhận BLOCK.');
+200:     state.processingStatus[key]=reason;
+201:     for(const a of state.pendingAutoActions||[])if(a.key===key){a.canConfirm=Detection.groupActionGate(state,f,now).ready&&Detection.isFsActive(state,f,now)&&Detection.backupReady(state,f,now)&&!rotationHeld(state,feature,f);a.waitReason=a.canConfirm?'':reason;}
+209:   Detection.applySchedule(state,Date.now());
+210:   if(Detection.pausedFor(state,f.group)){f.actionError='Nhóm này đang nghỉ theo lịch; không BLOCK.';return false;}
+211:   state.rotationBarriers=Detection.rotationBarriers(await rotationFeature());
+212:   if(!Detection.groupActionGate(state,f,Date.now()).ready||!Detection.backupReady(state,f,Date.now())||rotationHeld(state,await rotationFeature(),f)||!Detection.isFsActive(state,f,Date.now())||!Detection.backupTargetValid(state,f,Date.now())||!state.monitoringEnabled||!state.autoEnabled||f.state!=='SUSPECTED'||!f.incident||
+214:     Date.now()-f.updatedAt>state.config.staleMs||(!Detection.cdrPrimary(state)&&f.recentMedian>f.baseline*state.config.suspectRatio)){
+215:     f.actionError='Sự cố đã thay đổi hoặc dữ liệu đã cũ; không BLOCK.';return false;
+216:   }
+217:   if(tabs.length!==1||!tabs[0].id){
+218:     f.actionError=`Expected exactly 1 FreeSWITCH tab; found ${tabs.length}`;
+219:     Detection.event(state,'AUTO_FAILED',f,now,f.actionError);return false;
+220:   }
+222:   Object.assign(f.incident,{locked:true,actionCount:1,requestedAt:now,switchedAt:null,oldPhone:phone,vtAtSwap:f.currentVt,actionPending:true});
+223:   f.switchedAt=null;f.actionError=null;
+224:   f.detectionNote='Đang chuyển ACTIVE → BLOCKED; chưa xác nhận hoàn tất';
+225:   Detection.refreshAlerts(state,now);
+226:   await saveState(state);
+239:       Object.assign(f.incident,{locked:false,actionCount:0,switchedAt:null,actionUncertain:false});
+240:       f.switchedAt=null;f.actionError=r.error||'FreeSWITCH từ chối trước khi đổi trạng thái';
+241:       f.autoValidationFailures=(f.autoValidationFailures||0)+1;
+242:       f.autoRetryAfter=Date.now()+state.config.autoValidationRetryMs;
+245:       Detection.refreshAlerts(state,Date.now());
+246:     }else{f.incident.actionUncertain=true;f.actionError=r?.error||'Status change result unknown';
+247:       Detection.event(state,'AUTO_FAILED',f,Date.now(),f.actionError);}
+248:   }catch(e){f.incident.actionPending=false;f.incident.actionUncertain=true;f.actionError=String(e);
+249:     Detection.event(state,'AUTO_FAILED',f,Date.now(),f.actionError);}
+250:   Detection.refreshAlerts(state,Date.now());
+294:     if(matches.length!==1||!matches[0].hasStatusControl||!state.freeswitch.updatedAt||now-state.freeswitch.updatedAt>state.config.staleMs){
+295:       f.actionError=`Expected one fresh ACTIVE ${profile} row with status control; found ${matches.length}`;
+296:       Detection.event(state,'AUTO_FAILED',f,now,f.actionError);continue;
+297:     }
+298:     if(f.incident.oldPhone&&f.incident.oldPhone!==matches[0].phone){
+299:       f.actionError='ACTIVE phone changed; waiting for updated configuration';continue;
+300:     }
+301:     if(!f.autoValidationFailures)f.actionError=null;
+302:     if(state.autoBlockMode==='AUTOMATIC'){
+303:       state.pendingAutoActions=state.pendingAutoActions.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong autoBlockNewAlerts. */ x=>x.key!==f.key);
+468:       }
+469:       f.autoValidationFailures=0;f.autoRetryAfter=null;f.actionError=null;
+470:       classify(state);await autoBlockNewAlerts(state);await saveState(state);
+471:       sendResponse({ok:!f.actionError,error:f.actionError,state});return;
+478:       f.incident.manualExecuted=true;f.incident.actionUncertain=false;f.incident.switchedAt=Date.now();
+479:       f.incident.stableSince=null;f.switchedAt=f.incident.switchedAt;f.history=[];f.actionError=null;
+480:       Detection.transition(state,f,'COOLDOWN',Date.now(),'User confirmed manual handling after uncertain result');
+481:       Detection.event(state,'MANUAL_SWITCH',f,Date.now(),'User confirmed manual handling; recovery lock retained');
+
+src/background/cdr-worker.js
+48:     const request={key:f.key,incidentId:f.incident?.id||f.candidateId,group,fs:f.fs,ip:f.ip,phone:active[0]?.phone,observation:state.config.cdrObservationEnabled,after:state.config.cdrObservationEnabled?Date.now()-30000:cdrAfter(f,Date.now())};
+49:     cdrJobs.set(group,request);f.cdrStatus='Đang Search CDR';
+50:     batch=batch.then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong scheduleCdrChecks. */ ()=>queryCdr(group,f.fs,f.ip)).then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong scheduleCdrChecks. */ records=>({records}),/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong scheduleCdrChecks. */ e=>({error:String(e.message||e)})).then(/** Tác dụng: Tiếp tục xử lý sau khi bước bất đồng bộ hoàn tất trong scheduleCdrChecks. */ result=>{
+51:       const receivedAt=Date.now();
+54:         if(!current||!Detection.isFsActive(latest,current,Date.now())||!request.observation&&(current.incident?.id||current.candidateId||current.lastIncident?.id)!==request.incidentId)return;
+55:         const checkedAt=receivedAt,proof=result.error?{locked:false,count:0,reason:result.error}:
+56:           Cdr.evaluate(result.records,{ip:request.ip,after:request.after,now:checkedAt,observation:request.observation,usedCallIds:request.observation?[]:current.cdrUsedCallIds});
+57:         const decision=result.error?{error:result.error,locked:false,count:0,eligibleCount:0}:
+74:         current.cdr={...proof,decision,lastConfirmed,traffic,records,receivedCalls:records.length,lastCall:records[0]||null,group,ip:request.ip,phone:request.phone,incidentId:request.incidentId,checkedAt};
+75:         current.cdrStatus=proof.reason;
+76:         if(!result.error&&latest.monitoringEnabled&&!Detection.pausedFor(latest,group)){
+77:           const activeNow=(latest.freeswitch?.numbers||[]).filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong scheduleCdrChecks. */ n=>n.fs===request.fs&&n.profile===profile&&n.status==='ACTIVE');
+
+src/background/fs-switch-worker.js
+36:   const deadline=Date.now()+20000;
+37:   let reason='Đang chờ trang OpenSIPS tải lại';
+38:   do{
+39:     try{
+46:         }
+47:         reason=r?.error||'Đang chờ content script của trang mới';
+48:       }
+49:     }catch(error){reason=String(error.message||error);}
+50:     await new Promise(/** Tác dụng: Nối callback của API bất đồng bộ vào Promise và trả kết quả hoặc lỗi trong refreshSwitchPage. */ resolve=>setTimeout(resolve,250));
+51:   }while(Date.now()<deadline);
+93:       proof=Cdr.evaluate(records,{ip:p.target.ip,after:op.targetWatchStartedAt,now:Date.now()});}
+94:     catch(error){proof={locked:false,reason:String(error.message||error)};}
+95: 
+96:     op.targetCdr=proof;

@@ -34,7 +34,7 @@ async function getState() {
     ...r.state,
     grafana:{...base.grafana,...(r.state.grafana||{})},
     opensips:{...base.opensips,...(r.state.opensips||{})},
-    config:{...base.config,...(r.state.config||{}),baselineSamples:Detection.CONFIG.baselineSamples,sampleIntervalMs:Detection.CONFIG.sampleIntervalMs,groupObserveMs:Detection.CONFIG.groupObserveMs,cdrObservationEnabled:true,cdrRequireVtDrop:r.state.config?.detectionSource==="VT"?false:(r.state.config?.cdrRequireVtDrop??true),detectionSource:r.state.config?.detectionSource||"CDR",cdrVerificationEnabled:(r.state.config?.detectionSource||"CDR")==="CDR",staleMs:45000,sampleGapMs:75000,
+    config:{...base.config,...(r.state.config||{}),baselineSamples:Detection.CONFIG.baselineSamples,collectionDayEndMinute:Detection.CONFIG.collectionDayEndMinute,sampleIntervalMs:Detection.CONFIG.sampleIntervalMs,groupObserveMs:Detection.CONFIG.groupObserveMs,cdrObservationEnabled:true,cdrRequireVtDrop:r.state.config?.detectionSource==="VT"?false:(r.state.config?.cdrRequireVtDrop??true),detectionSource:r.state.config?.detectionSource||"CDR",cdrVerificationEnabled:(r.state.config?.detectionSource||"CDR")==="CDR",staleMs:45000,sampleGapMs:75000,
       workdayStartMinute:480,scheduledPauseStartMinute:700,
       backupBlockWaitMs:5000,
       freeSwitchActionGapMs:3000,freeSwitchAutomaticGapMs:3000}
@@ -153,7 +153,7 @@ let statusWriteInProgress=false;
 async function sendFreeSwitchStatus(state,tabId,payload,automatic=false){
   const live=await getState();
   if(!Detection.isNumberNodeSelected(live,payload.fs,payload.profile))return {ok:false,attempted:false,errorCode:'NODE_NOT_SELECTED',error:'Node không được chọn monitor; không đổi trạng thái số'};
-  if(Detection.collectionHardStop(payload.profile==='COLLECTION'?'99.153':'99.155',Date.now()))return {ok:false,attempted:false,errorCode:'SCHEDULE_STOP',error:'Collection dừng cứng 18:05–08:00; không đổi trạng thái số'};
+  if(Detection.collectionHardStop(payload.profile==='COLLECTION'?'99.153':'99.155',Date.now(),live.config))return {ok:false,attempted:false,errorCode:'SCHEDULE_STOP',error:'Nhóm ngoài giờ hoạt động; không đổi trạng thái số'};
   // Reserve before sending; the DOM can update before the SQLite transaction
   // finishes. Reserve a longer quiet period for unattended automatic writes.
   const gap=Math.max(3000,automatic?(state.config.freeSwitchAutomaticGapMs||3000):(state.config.freeSwitchActionGapMs||3000));

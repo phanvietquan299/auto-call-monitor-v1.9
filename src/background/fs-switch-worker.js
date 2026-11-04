@@ -23,7 +23,13 @@ async function switchTab(url){
   if(group&&typeof openSipsTabWithRole==='function')return openSipsTabWithRole(group,'LOAD_BALANCER');
   const tabs=await chrome.tabs.query({url});if(tabs.length!==1)throw Error('Cần mở đúng một tab: '+url);return tabs[0].id;}
 /** Tác dụng: Gửi lệnh tới content script và từ chối kết quả không xác nhận thành công. */
-async function switchCommand(id,msg){if(['AUTO_BLOCK_FS','MANUAL_FS_STATUS'].includes(msg.type)&&Detection.collectionHardStop(msg.profile==='COLLECTION'?'99.153':'99.155',Date.now()))throw Error('Collection nghỉ 18:05–08:00; không đổi số');if(msg.type==='FS_SWITCH_SET_GROUP'){const live=await getState();if(msg.value!==0&&Detection.collectionHardStop(msg.group,Date.now()))throw Error('Collection nghỉ 18:05–08:00; không bật node');if(!Detection.isNodeSelected(live,{group:msg.group,ip:msg.node?.ip}))throw Error('Node không được chọn monitor; không đổi Group ID');}const r=await chrome.tabs.sendMessage(id,msg);if(!r?.ok)throw Error(r?.error||'Trang không xác nhận thành công.');return r;}
+async function switchCommand(id,msg){
+ const live=await getState();
+ const group=msg.group||(msg.profile==='COLLECTION'?'99.153':'99.155');
+ if(['AUTO_BLOCK_FS','MANUAL_FS_STATUS','FS_SWITCH_SET_GROUP','FS_SWITCH_RELOAD_SERVER'].includes(msg.type)&&Detection.collectionHardStop(group,Date.now(),live.config))throw Error('Nhóm ngoài giờ hoạt động; không can thiệp FS/số');
+ if(msg.type==='FS_SWITCH_SET_GROUP'&&!Detection.isNodeSelected(live,{group:msg.group,ip:msg.node?.ip}))throw Error('Node không được chọn monitor; không đổi Group ID');
+ const r=await chrome.tabs.sendMessage(id,msg);if(!r?.ok)throw Error(r?.error||'Trang không xác nhận thành công.');return r;
+}
 /** Mở danh sách bằng GET; không reload tài liệu POST để tránh hộp thoại gửi lại form. */
 async function navigateLoadBalancer(tab,group){
  if(!FsSwitch.groups[group])throw Error('Nhóm OpenSIPS không hợp lệ.');
@@ -289,6 +295,15 @@ function reconcileSwitchLocks(f,s){
 }
 /** Tác dụng: Xử lý lệnh thay FS, chọn node hiển thị và điều phối thao tác tương ứng trên hàng đợi chung. */
 async function processSwitch(msg){
+  if(msg.type==='FS_SWITCH_SETTINGS'&&msg.workHours){
+    const {group,start,end}=msg.workHours;
+    if(!['99.153','99.155'].includes(group)||!Number.isInteger(start)||!Number.isInteger(end)||start<0||start>=end||end>=1440)throw Error('Giờ bắt đầu phải nhỏ hơn giờ kết thúc trong cùng ngày.');
+    const live=await getState();
+    live.config.workHours={...live.config.workHours,[group]:{start,end}};
+    Detection.applySchedule(live,Date.now());
+    await saveState(live);return {ok:true,state:live};
+  }
+
   // Scope settings cancel unsent intents, but never change routing, automatic modes or in-flight locks.
   if(msg.type==='FS_SWITCH_SETTINGS'&&(msg.displayGroup||msg.refreshGroup)){
     const group=msg.displayGroup||msg.refreshGroup;

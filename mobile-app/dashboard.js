@@ -4,6 +4,8 @@ async function getState(){
   return r?.state||null;
 }
 const esc=/** Tác dụng: Escape ký tự HTML trong dữ liệu trước khi đưa vào giao diện. */ s=>String(s??"").replace(/[&<>"]/g,/** Tác dụng: Thay ký tự hoặc đoạn khớp biểu thức bằng nội dung đã chuyển đổi trong esc. */ c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+/** Tác dụng: Rút gọn phần hiển thị Incident / Recovery; giữ nguyên dữ liệu gốc để xử lý và xem đầy đủ. */
+function shortIncidentText(value){return String(value??'').split(';',1)[0].trim();}
 const manualStatusBusy=new Set();
 const manualStatusNotes=new Map();
 /** Tác dụng: Chỉ hiển thị số ACTIVE màu xanh khi routing OpenSIPS của FS còn mới và đúng Group ID. */
@@ -21,6 +23,28 @@ function manualStatusControl(s,fs,profile){
  const note=manualStatusNotes.get(fs),noteHtml=note&&Date.now()<note.until?`<small class="${note.error?'bad':'good'}">${esc(note.text)}</small>`:'';
  return `<div class="fs-phone-status"><span>${esc(row.phone)}</span><select aria-label="Trạng thái số ${esc(fs)}" data-phone-status data-fs="${esc(fs)}" data-phone="${esc(row.phone)}" data-expected="${esc(row.status)}" ${busy?'disabled':''}>${['ACTIVE','BACKUP','BLOCKED'].map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong manualStatusControl. */ status=>`<option value="${status}" ${status===row.status?'selected':''}>${{ACTIVE:active?'🟢':'⚪',BACKUP:'🔵',BLOCKED:'🔴'}[status]} ${status}</option>`).join('')}</select>${busy?'<small>Đang đổi…</small>':noteHtml}</div>`;
 }
+const workHourDrafts=new Map(),workHourBusy=new Set(),workHourNotes=new Map();
+function workHourValues(s,group){return workHourDrafts.get(group)||s.config?.workHours?.[group]||{start:480,end:group==='99.153'?1110:1020};}
+function timeValue(minute){return `${String(Math.floor(minute/60)).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;}
+document.querySelector('#groups').addEventListener('input',event=>{
+ const input=event.target.closest('[data-work-hour]');if(!input)return;
+ const form=input.closest('[data-work-hours]'),group=form.dataset.workHours;
+ const draft={};
+ for(const field of form.querySelectorAll('[data-work-hour]')){const [h,m]=field.value.split(':').map(Number);draft[field.dataset.workHour]=h*60+m;}
+ workHourDrafts.set(group,draft);
+
+});
+document.querySelector('#groups').addEventListener('submit',async event=>{
+ const form=event.target.closest('[data-work-hours]');if(!form)return;event.preventDefault();
+ const group=form.dataset.workHours,button=form.querySelector('button'),status=form.querySelector('[role=status]');
+ const read=name=>{const [h,m]=form.querySelector(`[data-work-hour="${name}"]`).value.split(':').map(Number);return h*60+m;};
+ if(workHourBusy.has(group))return;workHourBusy.add(group);button.disabled=true;
+ try{
+  const r=await chrome.runtime.sendMessage({type:'FS_SWITCH_SETTINGS',workHours:{group,start:read('start'),end:read('end')}});
+  if(!r?.ok)throw Error(r?.error||'Chưa lưu được giờ');
+  workHourDrafts.delete(group);workHourNotes.set(group,'Đã lưu');status.textContent='Đã lưu';
+ }catch(error){workHourNotes.set(group,error.message);status.textContent=error.message;}finally{workHourBusy.delete(group);button.disabled=false;}
+});
 document.querySelector('#groups').addEventListener('click',/** Tác dụng: Xử lý nút được bấm theo thuộc tính dữ liệu và gửi yêu cầu tương ứng. */ async event=>{
  const button=event.target.closest('[data-refresh-phone]');if(!button)return;
  button.disabled=true;confirmationNotice('Đang đọc lại số từ FreeSWITCH…');
@@ -201,6 +225,7 @@ function patchChildren(target,source){
       target.replaceChild(next.cloneNode(true),current);continue;
     }
     if(current.nodeType===1){
+      if(current.matches('[data-work-hour]')&&document.activeElement===current)continue;
       if(current.nodeName==='SELECT'&&current.hasAttribute('data-phone-status')){
         const sameTarget=current.getAttribute('data-fs')===next.getAttribute('data-fs')&&current.getAttribute('data-phone')===next.getAttribute('data-phone');
         if(sameTarget&&(document.activeElement===current||manualStatusBusy.has(current.dataset.fs)))continue;
@@ -268,7 +293,7 @@ function renderConfirmation(s,force=false){
   confirmationButton.textContent=`Xác nhận BLOCK (${pending.length})`;
   if(!action){
     dialog.close();selectedAction=null;
-    if(force)confirmationNotice(Object.values(s.schedule?.groups||{}).some(/** Tác dụng: Kiểm tra có phần tử nào thỏa điều kiện trong renderConfirmation. */ g=>g.paused)?'Không có yêu cầu BLOCK hợp lệ. Sale nghỉ 11:40–13:00 và 17:00–08:00; Collection nghỉ 12:10–13:00 và 18:00–08:00.':s.autoEnabled?'Chưa có yêu cầu BLOCK hợp lệ chờ xác nhận.':'AUTO BLOCK đang OFF. Bật AUTO để tạo yêu cầu xác nhận.');
+    if(force)confirmationNotice(Object.values(s.schedule?.groups||{}).some(/** Tác dụng: Kiểm tra có phần tử nào thỏa điều kiện trong renderConfirmation. */ g=>g.paused)?'Không có yêu cầu BLOCK hợp lệ. Nhóm đang nghỉ theo giờ hoạt động đã lưu.':s.autoEnabled?'Chưa có yêu cầu BLOCK hợp lệ chờ xác nhận.':'AUTO BLOCK đang OFF. Bật AUTO để tạo yêu cầu xác nhận.');
     return;
   }
   selectedAction=action;
@@ -337,7 +362,7 @@ async function render(){
   const pauseNotice=['99.153','99.155'].map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong render. */ group=>{
     const g=schedules[group],name=group==='99.153'?'Collection':'Sale';
     if(!g?.paused)return '';
-    return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–08:00`:`tạm nghỉ ${esc(g.startAt)}–13:00`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?(group==='99.153'?'Dừng Search CDR và đổi số đến 08:00; MONITORING tắt tay vẫn giữ OFF.':'Vẫn đọc Group ID/CDR. Đến 08:00 đánh giá CDR mới; MONITORING tắt tay vẫn giữ OFF.'):'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
+    return `<div class="card watching"><b>${name} · ${g.phase==='DAY_END'?`dừng qua đêm ${esc(g.startAt)}–${esc(g.endAt)}`:`tạm nghỉ ${esc(g.startAt)}–${esc(g.endAt)}`} (giờ Việt Nam)</b><div>${g.phase==='DAY_END'?'Nhóm này đã ngừng theo lịch; extension không phát hiện/block hoặc yêu cầu xác nhận.':group==='99.155'&&g.phase==='HANDOFF'?'Hệ thống tự động chạy FS08/09/10; extension không tiếp quản.':'Giảm tải theo lịch; không cảnh báo block cho nhóm này.'}</div><div>${g.phase==='DAY_END'?`Dừng Search CDR và can thiệp đến ${esc(g.endAt)}; MONITORING tắt tay vẫn giữ OFF.`:'Vẫn đọc Group ID/CDR. Từ 13:00 đánh giá CDR mới.'}</div></div>`;
   }).join('');
   document.querySelector("#summary").innerHTML=importantMarkup+specialMarkup+pauseNotice+(alerts.length
     ? `<div class="card bad"><b>${s.config?.cdrVerificationEnabled?'CDR XÁC NHẬN NGHI BLOCK':'SUSPECTED BLOCK'}</b>${alerts.map(/** Tác dụng: Chuyển từng phần tử sang cấu trúc kết quả cần dùng trong render. */ a=>`<div>${esc(a.group)} → ${esc(a.fs)} (${esc(a.ip)})${a.actionPending?' · Đang đổi, chưa hoàn tất':a.actionUncertain?' · Chưa xác minh BLOCKED, cần kiểm tra':''}${s.processingStatus?.[`${a.group}|${a.fs}|${a.ip}`]?`<br>${esc(s.processingStatus[`${a.group}|${a.fs}|${a.ip}`])}`:''}</div>`).join("")}${s.autoEnabled
@@ -350,7 +375,8 @@ async function render(){
   let groups="";
   for(const g of ["99.153","99.155"]){
     const os=s.opensips[g]||{};
-    groups+=`<div class="card"><div class="node-group-heading"><b>${g==='99.153'?'Collection':'Sale'} · ${g}</b><button class="secondary" data-add-node="${g}">Thêm node</button></div>
+    const hours=workHourValues(s,g);
+    groups+=`<div class="card"><div class="node-group-heading"><b>${g==='99.153'?'Collection':'Sale'} · ${g}</b><form class="work-hours" data-work-hours="${g}"><label><span>Bắt đầu</span><input type="time" aria-label="Giờ bắt đầu" required data-work-hour="start" value="${timeValue(hours.start)}"></label><label><span>Kết thúc</span><input type="time" aria-label="Giờ kết thúc" required data-work-hour="end" value="${timeValue(hours.end)}"></label><button class="secondary" type="submit"${workHourBusy.has(g)?' disabled':''}>Lưu</button><small role="status">${esc(workHourNotes.get(g)||'')}</small></form><button class="secondary" data-add-node="${g}">Thêm node</button></div>
     <div class="table-wrap"><table><tr><th>FS</th><th>IP</th><th>VT</th><th>State</th><th>Dãy CDR</th><th>Số lần liên tiếp</th><th>Incident / Recovery</th><th>Profile</th></tr>`;
     for(const n of FsSwitch.displayRows(s,g)){
       const tc=n.trend==="DOWN"?"down":n.trend==="UP"?"up":"";
@@ -394,7 +420,7 @@ async function render(){
       const backupProfile=g==='99.153'?'COLLECTION':'TELESALE';
       const cachedBackup=s.freeswitch?.backupCounts?.[n.fs];
       const backupCount=cachedBackup?.count??(s.freeswitch?.numbers? s.freeswitch.numbers.filter(/** Tác dụng: Giữ các phần tử thỏa điều kiện kiểm tra trong render. */ row=>row.fs===n.fs&&row.profile===backupProfile&&row.status==='BACKUP').length:null);
-      groups+=`<tr><td data-label="FS">${esc(n.fs||"Chưa ghép tên")} (${backupCount??'—'})${n.displayOnly?'':manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br>${esc(status)}${fs.baselineRelearnNote?`<br><span class="muted">${esc(fs.baselineRelearnNote)}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
+      groups+=`<tr><td data-label="FS">${esc(n.fs||"Chưa ghép tên")} (${backupCount??'—'})${n.displayOnly?'':manualStatusControl(s,n.fs,backupProfile)}</td><td data-label="IP">${esc(n.ip)}</td><td data-label="VT">${esc(n.used??fs.currentVt??"—")}/${esc(n.capacity??"—")}</td><td data-label="Trạng thái" class="${stateClass}">${esc(shownState)}<br><span class="muted">Group ID: ${esc(n.groupId??fs.groupId??"—")}</span>${s.config.cdrRequireVtDrop?`<br><span class="muted">Baseline: ${esc(fs.baseline??"—")} · Tụt: ${esc(fs.dropPercent??"—")}%</span>`:""}</td>${routed?cdrCell:'<td data-label="Dãy CDR">FS không hoạt động</td><td data-label="Liên tiếp">—</td>'}<td data-label="Xử lý">${esc(fs.incident?.id||fs.candidateId||"-")}<br><span title="${esc(status)}">${esc(shortIncidentText(status))}</span>${fs.baselineRelearnNote?`<br><span class="muted" title="${esc(fs.baselineRelearnNote)}">${esc(shortIncidentText(fs.baselineRelearnNote))}</span>`:""}${manualButton}${failureButton}${Date.now()-(fs.updatedAt||0)>s.config.staleMs?" · STALE":""}</td><td data-label="Profile">${esc(n.description)}</td></tr>`;
     }
     groups+="</table></div></div>";
   }

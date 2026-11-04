@@ -6,7 +6,7 @@
   const local=new Date(now+25200000);
   return {date:local.toISOString().slice(0,10),minute:local.getUTCHours()*60+local.getUTCMinutes(),previousDate:new Date(local.getTime()-86400000).toISOString().slice(0,10)};
  }
- function eveningDate(now){const t=phase(now);return t.minute>=1085?t.date:t.minute<480?t.previousDate:null;}
+ function eveningDate(now){const t=phase(now);return t.minute>=1110?t.date:t.minute<480?t.previousDate:null;}
  // Never generate a routing job, including from persisted NIGHT/FINAL_CONFIRMED state.
  function finalChange(){return null;}
  function next(){return null;}

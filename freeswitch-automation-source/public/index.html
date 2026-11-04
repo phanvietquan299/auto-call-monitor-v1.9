@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>FreeSWITCH Automation Dashboard</title>
+  <script src="/js/theme.js?v=20261103-1"></script>
+  <link rel="stylesheet" href="/css/theme.css?v=20261103-1">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="/socket.io/socket.io.js"></script>
@@ -17,6 +19,27 @@
     .table-responsive {
       -webkit-overflow-scrolling: touch;
     }
+    main,#dashboard-section,#section-monitor,#monitor-groups{min-width:0;max-width:100%}
+    body.monitor-view main{width:100%;max-width:none;padding-left:12px;padding-right:12px}
+    body.monitor-view nav>div{max-width:none}
+    @media(max-width:640px){body.monitor-view main{padding-left:8px;padding-right:8px}}
+    #monitor-groups .monitor-card{width:100%;min-width:0;max-width:100%;overflow:hidden}
+    .monitor-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+    .monitor-scroll::-webkit-scrollbar{height:10px}
+    .monitor-scroll::-webkit-scrollbar-thumb{background:var(--fs-border,#cbd5e1);border-radius:8px}
+    .monitor-table{width:100%;min-width:850px;table-layout:auto;font-size:14px}
+    .monitor-table th{font-size:12px;padding:6px 6px}
+    .monitor-table td{font-size:14px;vertical-align:middle;padding:4px 6px;line-height:1.25}
+    .monitor-table td.text-xs,.monitor-table td .text-xs{font-size:12px;line-height:1.25}
+    .monitor-table td:nth-child(7){white-space:normal;overflow-wrap:anywhere}
+    #monitor-groups h3{font-size:16px}
+    #monitor-groups .monitor-card>div:first-child{padding:8px 12px}
+    #monitor-groups .monitor-card>div:first-child button{padding:5px 10px;font-size:12px}
+    #monitor-groups{display:grid;gap:12px}
+    #monitor-groups>div{margin-top:0}
+    .monitor-table td:first-child{padding-top:9px;padding-bottom:9px;line-height:1.4}
+    .monitor-table .monitor-phone-status{display:grid;gap:6px;margin-top:10px;min-width:125px;font-size:12px}
+    .monitor-phone-status select{width:100%;height:auto;min-height:0;margin-top:0;padding:7px 6px;font-size:12px;line-height:normal;border-radius:8px}
     th, td {
       white-space: nowrap;
     }
@@ -34,16 +57,20 @@
       </div>
 
       <!-- TABS & ACTIONS -->
-      <div class="flex items-center space-x-2 md:space-x-4">
-        <div id="nav-tabs" class="hidden flex space-x-1 md:space-x-2">
+      <div class="flex flex-wrap items-center gap-2 md:gap-4">
+        <div id="nav-tabs" class="hidden flex flex-wrap gap-1 md:gap-2">
           <button onclick="switchTab('nodes')" id="tab-nodes" class="px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center">
             <i class="fas fa-server mr-1"></i> <span class="hidden sm:inline">Quản Lý </span>Node & Số
+          </button>
+          <button onclick="switchTab('monitor')" id="tab-monitor" class="px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center">
+            <i class="fas fa-heartbeat mr-1"></i> Monitor
           </button>
           <button onclick="switchTab('report')" id="tab-report" class="px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center">
             <i class="fas fa-chart-pie mr-1"></i> Báo Cáo
           </button>
         </div>
 
+        <button id="theme-toggle" type="button" aria-label="Chuyển sang chế độ tối" aria-pressed="false">☾ Dark</button>
         <div id="auth-info" class="hidden flex items-center space-x-2">
           <span class="hidden md:inline text-xs bg-slate-700 px-2.5 py-1 rounded-full text-slate-200" id="user-display"><i class="fas fa-user mr-1"></i> Admin</span>
           <button onclick="logout()" class="text-xs bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-2.5 rounded-lg transition flex items-center">
@@ -129,9 +156,7 @@
               <i class="fas fa-phone-alt mr-2 text-cyan-600"></i> Quản Lý Kho Số Điện Thoại
             </h3>
             <div class="flex items-center space-x-1.5 md:space-x-2">
-              <button onclick="openUploadExcelModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center">
-                <i class="fas fa-file-excel mr-1"></i> Import
-              </button>
+              <div id="phone-import-controls"><button id="server-import-open" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center"><i class="fas fa-file-excel mr-1"></i> Import</button></div>
               <button onclick="openAddNumbersModal()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded-lg text-xs transition flex items-center">
                 <i class="fas fa-plus mr-1"></i> Nạp Số
               </button>
@@ -151,17 +176,25 @@
                 </select>
               </div>
 
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
                 <select id="filter-status" onchange="filterNumbers()" class="border rounded-lg px-2 py-1.5 text-xs bg-white w-full">
                   <option value="ALL">Tất cả Trạng thái</option>
                   <option value="ACTIVE">ACTIVE</option>
                   <option value="BACKUP">BACKUP</option>
                   <option value="BLOCKED">BLOCKED</option>
                 </select>
-                <button onclick="bulkDeleteNumbers()" class="text-xs bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-bold py-1.5 px-2 rounded-lg transition flex items-center justify-center">
-                  <i class="fas fa-trash-alt mr-1"></i>Xóa theo lọc
-                </button>
+                <div id="number-selection-anchor" style="min-height:40px">
+            <div id="number-selection-actions" role="region" aria-label="Xóa số đã chọn" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">
+              <button id="delete-selected-numbers" type="button" disabled class="text-xs bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-1.5 px-2 rounded-lg">Xóa số đã chọn (<span id="number-selection-count">0</span>)</button>
+              <button id="clear-number-selection" type="button" disabled class="text-xs bg-gray-200 disabled:opacity-50 text-gray-700 font-bold py-1.5 px-2 rounded-lg">Bỏ chọn</button>
+            </div>
+                </div>
+
               </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+              <span id="number-selection-status" role="status" aria-live="polite"></span>
             </div>
 
             <!-- BẢNG SỐ ĐIỆN THOẠI -->
@@ -174,15 +207,35 @@
                     <th class="py-2.5 px-2 text-center hidden sm:table-cell">Profile</th>
                     <th class="py-2.5 px-1.5 text-center">Trạng Thái</th>
                     <th class="py-2.5 px-1.5 text-center">Tác Vụ</th>
-                    <th class="py-2.5 px-2 text-center">Xóa</th>
+                    <th class="py-2.5 px-2 text-center"><input id="select-all-numbers" type="checkbox" aria-label="Chọn tất cả số đang hiển thị" title="Chọn tất cả số đang hiển thị" style="width:18px;height:18px;vertical-align:middle"></th>
                   </tr>
                 </thead>
                 <tbody id="numbers-tbody" class="divide-y divide-gray-200"></tbody>
               </table>
             </div>
+            <div id="number-selection-spacer" style="display:none;height:90px" aria-hidden="true"></div>
           </div>
         </div>
 
+      </div>
+
+      <!-- Read-only live Monitor tables. -->
+      <div id="section-monitor" class="hidden space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="monitor-toggle" type="button" onclick="toggleMonitor()" disabled aria-pressed="false" class="rounded-lg px-4 py-2 font-bold bg-slate-700 text-white disabled:opacity-50">MONITOR: …</button>
+          <span id="monitor-toggle-message" role="status" class="text-sm text-slate-500"></span>
+        </div>
+        <div id="monitor-groups" class="space-y-4"></div>
+        <dialog id="monitor-node-dialog" style="width:min(92vw,560px);max-height:85vh;border:1px solid #cbd5e1;border-radius:16px;padding:20px">
+          <h3 id="monitor-node-title" class="font-bold text-lg mb-3"></h3>
+          <p class="text-sm text-slate-500 mb-3">Chọn node từ Quản lý Node. Chỉ node được tick mới hiển thị và đọc CDR trên Monitor.</p>
+          <div id="monitor-node-options" class="space-y-2"></div>
+          <p id="monitor-node-message" role="status" class="text-sm text-red-600 mt-3"></p>
+          <div class="flex justify-end gap-2 mt-4">
+            <button type="button" onclick="document.getElementById('monitor-node-dialog').close()" class="bg-slate-100 px-4 py-2 rounded-lg">Hủy</button>
+            <button id="monitor-node-save" type="button" onclick="saveMonitorNodes()" class="bg-cyan-600 text-white px-4 py-2 rounded-lg disabled:opacity-50">Lưu</button>
+          </div>
+        </dialog>
       </div>
 
       <!-- TAB 2: BÁO CÁO REPORT -->
@@ -471,26 +524,14 @@
     </div>
   </div>
 
-  <!-- MODAL IMPORT EXCEL -->
-  <div id="modal-upload-excel" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-3 z-50">
-    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-3 border max-h-[90vh] overflow-y-auto">
-      <h3 class="text-base font-bold text-slate-800">Import Số Tự Động Bằng Excel</h3>
-      <p class="text-xs text-gray-500">File Excel cần chứa các cột: <b>SĐT</b>, <b>Node</b>, và <b>Profile</b>.</p>
-      <div>
-        <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="w-full border rounded-lg px-3 py-2 text-xs">
-      </div>
-      <div class="flex justify-end space-x-2 pt-2">
-        <button onclick="closeModal('modal-upload-excel')" class="px-4 py-1.5 bg-gray-200 text-gray-700 font-bold rounded-lg text-xs">Hủy</button>
-        <button onclick="submitUploadExcel()" class="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg text-xs">Tải Lên</button>
-      </div>
-    </div>
-  </div>
-
+  <script src="/js/number-selection.js?v=20261102-3"></script>
   <!-- JAVASCRIPT LOGIC -->
   <script>
     const socket = io();
     let currentNodes = [];
     let currentNumbers = [];
+    let monitorSnapshot = null, monitorFetching = false, monitorError = '', monitorToggleBusy = false, monitorToggleNote = '', monitorRequestVersion = 0;
+    const numberSelection = NumberSelection.create({ onDeleted: () => loadAllData() });
     let statusChartInstance = null;
     let profileChartInstance = null;
     let currentEditingNodeConfig = 'DEFAULT';
@@ -517,6 +558,7 @@
         document.getElementById('user-display').innerHTML = `<i class="fas fa-user mr-1"></i> ${data.user}`;
         fetch('/api/runtime').then(r => r.json()).then(runtime => {
           document.getElementById('preview-mode-banner').classList.toggle('hidden', !runtime.readOnly);
+          if(runtime.readOnly && runtime.importAllowed)document.getElementById('preview-mode-banner').textContent=runtime.deleteAllowed?'BẢN THỬ · DATABASE RIÊNG · Cho nạp Excel và xóa kho thử; đã tắt ESL, tự đổi số và ghi SSH/Redis.':'BẢN THỬ · DATABASE RIÊNG · Chỉ cho nạp Excel vào kho thử; đã tắt ESL, tự đổi số và ghi SSH/Redis.';
         }).catch(() => {});
         loadAllData();
       } else {
@@ -554,22 +596,149 @@
     }
 
     function switchTab(tab) {
-      document.getElementById('tab-nodes').className = tab === 'nodes' ? 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center' : 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center';
-      document.getElementById('tab-report').className = tab === 'report' ? 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-cyan-600 text-white flex items-center' : 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold hover:bg-slate-800 text-gray-300 flex items-center';
-
-      if (tab === 'nodes') {
-        document.getElementById('section-nodes').classList.remove('hidden');
-        document.getElementById('section-report').classList.add('hidden');
-      } else {
-        document.getElementById('section-nodes').classList.add('hidden');
-        document.getElementById('section-report').classList.remove('hidden');
-        loadReports();
+      if (!['nodes','monitor','report'].includes(tab)) return;
+      document.body.classList.toggle('monitor-view',tab==='monitor');
+      for (const name of ['nodes','monitor','report']) {
+        document.getElementById('tab-'+name).className = 'px-2.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold flex items-center ' + (name === tab ? 'bg-cyan-600 text-white' : 'hover:bg-slate-800 text-gray-300');
+        document.getElementById('section-'+name).classList.toggle('hidden', name !== tab);
       }
+      if (tab === 'report') loadReports();
+      if (tab === 'monitor') { renderMonitor(currentNodes); fetchMonitor(); }
     }
+
+    function renderMonitor(nodes) {
+      renderMonitorControl();
+      const inventory = monitorSnapshot?.inventory;
+      if (inventory?.source === '5003') nodes = inventory.nodes;
+      const inventoryFresh = !!inventory?.fresh && Date.now() - (inventory.at || 0) <= 10000;
+      nodes = nodes.filter(node => ['COLLECTION','TELESALE'].includes(node.profile));
+      const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const groups = [['Collection · 99.153', 'COLLECTION'], ['Sale · 99.155', 'TELESALE']];
+      const markup = groups.map(([name,profile]) => {
+        const group = profile === 'COLLECTION' ? '99.153' : '99.155';
+        const selected = new Set(monitorSnapshot?.selection?.groups?.[group] || []);
+        const rows = nodes.filter(n => n.profile === profile && selected.has(JSON.stringify([n.id,n.host,n.profile])));
+        return `<div data-monitor-group="${group}" class="monitor-card bg-white border border-gray-200 rounded-xl shadow overflow-hidden"><div class="flex items-center justify-between gap-3 p-4 border-b border-gray-200"><h3 class="font-bold">${name}</h3><button type="button" onclick="openMonitorNodes('${group}')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg px-3 py-2 text-sm font-semibold">Thêm node</button></div><div class="monitor-scroll table-responsive" role="region" aria-label="Bảng ${name}" tabindex="0"><table class="monitor-table w-full"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="p-3 text-left">FS</th><th class="p-3 text-left">IP</th><th class="p-3 text-left">Traffic</th><th class="p-3 text-left">State</th><th class="p-3 text-left">Dãy CDR</th><th class="p-3 text-left">Số lần liên tiếp</th><th class="p-3 text-left">Incident / Recovery</th><th class="p-3 text-left">Profile</th></tr></thead><tbody>${rows.map(n => {
+          const publicIp = window.PhoneImport?.targets.find(t => t.ip === n.host)?.publicIp || additionalPublicIps[n.host] || 'Chưa có mapping';
+          const live = monitorSnapshot?.groups?.[profile === 'COLLECTION' ? '99.153' : '99.155']?.nodes?.find(row => row.ip === n.host && row.id === n.id);
+          const trafficFresh = monitorSnapshot?.enabled !== false && live?.trafficFresh && Date.now() - (live.traffic?.at || 0) <= 15000;
+          const routed = trafficFresh && live.traffic?.groupId === (profile === 'COLLECTION' ? 2 : 3);
+          const cdrFresh = routed && live?.cdr?.fresh && Date.now() - (live.cdr.at || 0) <= 30000;
+          const age = at => at ? Math.max(0, Math.floor((Date.now()-at)/1000)) + 's ago' : '—';
+          const traffic = trafficFresh && live.traffic ? `${live.traffic.used}/${live.traffic.capacity}` : '—';
+          const records = (routed ? live?.cdr?.records || [] : []).slice(0,3).map(r => `<div>${escape(r.sipCode ?? '?')}-${escape(r.setupTime ?? '?')}-${escape(r.duration ?? '?')}<span class="text-slate-400 ml-1">${escape(age(r.time))}</span></div>`).join('');
+          const state = monitorSnapshot?.enabled === false ? 'MONITOR_OFF' : !live ? 'Chưa kết nối' : !trafficFresh ? 'WAITING_TRAFFIC' : live.state;
+          const status = monitorSnapshot?.enabled === false ? 'MONITOR đang OFF' : !live ? monitorError || 'Chờ kết nối bộ đọc OpenSIPS' : !trafficFresh && live.trafficFresh ? 'Traffic đã cũ; chờ cập nhật' : live.status;
+          return `<tr data-monitor-row="${escape(JSON.stringify([n.id,n.host,n.profile]))}" class="border-t border-gray-100"><td data-label="FS" class="p-3"><div class="font-bold">${escape(n.id)} (${inventoryFresh ? Number(n.backup_num)||0 : '—'})</div>${window.MonitorNumberStatus?.render(n,monitorSnapshot?.numberStatus,routed) || '<div class="text-sm text-slate-500">Chờ cập nhật số</div>'}</td><td data-label="IP" class="p-3 font-mono text-xs"><div>${escape(n.host)}</div><div class="text-slate-500 mt-1">${escape(publicIp)}</div></td><td data-label="Traffic" class="p-3">${escape(traffic)}</td><td data-label="State" class="p-3 text-xs text-slate-500"><div>${escape(state)}</div><div class="mt-1">Group ID: ${escape(trafficFresh ? live.traffic?.groupId ?? '—' : '—')}</div></td><td data-label="Dãy CDR" class="p-3 text-xs ${cdrFresh ? 'text-slate-700' : 'text-slate-400'}">${records || (monitorSnapshot?.enabled === false ? 'MONITOR OFF' : !trafficFresh ? 'Chờ Traffic' : !routed ? 'FS không hoạt động' : 'Chờ CDR')}${records && !cdrFresh ? '<div>Dữ liệu cũ</div>' : ''}</td><td data-label="Số lần liên tiếp" class="p-3">${cdrFresh ? escape(live.cdr.consecutive ?? 0) + '/5' : '—'}</td><td data-label="Incident / Recovery" class="p-3 text-xs text-slate-500" title="${escape(status)}">${escape(String(status).split(';')[0])}</td><td data-label="Profile" class="p-3 text-xs">${escape(profile)}</td></tr>`;
+        }).join('') || '<tr><td colspan="8" class="p-4 text-slate-500">Chưa chọn node. Bấm Thêm node để chọn FS cần hiển thị.</td></tr>'}</tbody></table></div></div>`;
+      }).join('');
+      // Preserve the horizontal scroll container while live rows refresh each second.
+      const container = document.getElementById('monitor-groups'), template = document.createElement('template');
+      template.innerHTML = markup;
+      for (const card of Array.from(template.content.children)) {
+        const current = Array.from(container.children).find(item => item.dataset.monitorGroup === card.dataset.monitorGroup);
+        if (current) {
+          const body=current.querySelector('tbody'),nextRows=Array.from(card.querySelector('tbody').children),kept=[];
+          for (const [index,nextRow] of nextRows.entries()) {
+            const row=Array.from(body.children).find(item=>item.dataset.monitorRow && item.dataset.monitorRow===nextRow.dataset.monitorRow);
+            if (row) {
+              for (const [cellIndex,nextCell] of Array.from(nextRow.children).entries()) {
+                const cell=row.children[cellIndex],select=cell.querySelector('[data-monitor-number-status]');
+                if (select && (select===document.activeElement || window.MonitorNumberStatus?.isBusy(select.dataset.key))) continue;
+                cell.innerHTML=nextCell.innerHTML;
+              }
+              if (body.children[index]!==row) body.insertBefore(row,body.children[index]||null);
+              kept.push(row);
+            } else {body.insertBefore(nextRow,body.children[index]||null);kept.push(nextRow);}
+          }
+          for (const row of Array.from(body.children)) if (!kept.includes(row)) row.remove();
+        }
+        else container.append(card);
+      }
+
+    }
+
+    let monitorNodeDraft = null, monitorNodeSaving = false;
+    async function openMonitorNodes(group) {
+      if (monitorNodeSaving) return;
+      const dialog = document.getElementById('monitor-node-dialog'), draft = {group};
+      monitorNodeDraft = draft;
+      document.getElementById('monitor-node-title').textContent = 'Thêm node · ' + (group === '99.153' ? 'Collection' : 'Sale');
+      document.getElementById('monitor-node-options').replaceChildren();
+      document.getElementById('monitor-node-message').textContent = 'Đang tải danh sách…';
+      document.getElementById('monitor-node-save').disabled = true;
+      if (!dialog.open) dialog.showModal();
+      try {
+        const response = await fetch('/api/monitor/nodes', {cache:'no-store',signal:AbortSignal.timeout(8000)});
+        const data = await response.json();
+        if (!response.ok) throw Error(data.error || 'Không tải được danh sách node');
+        if (monitorNodeDraft !== draft) return;
+        draft.revision = data.revision;
+        const selected = new Set(data.groups[group] || []), profile = group === '99.153' ? 'COLLECTION' : 'TELESALE';
+        for (const node of data.nodes.filter(n => n.profile === profile)) {
+          const label = document.createElement('label'); label.className = 'flex items-center gap-3 p-3 rounded-lg border border-slate-200 cursor-pointer';
+          const input = document.createElement('input'); input.type = 'checkbox'; input.value = JSON.stringify([node.id,node.host,node.profile]); input.checked = selected.has(input.value); input.style.cssText = 'width:18px;height:18px;flex-shrink:0';
+          const text = document.createElement('span'); text.textContent = node.id + ' · ' + node.host;
+          label.append(input,text);document.getElementById('monitor-node-options').append(label);
+        }
+        document.getElementById('monitor-node-message').textContent = data.nodes.some(n => n.profile === profile) ? '' : 'Chưa có node thuộc nhóm này trong Quản lý Node.';
+        document.getElementById('monitor-node-save').disabled = false;
+      } catch (error) { if (monitorNodeDraft === draft) document.getElementById('monitor-node-message').textContent = error.message; }
+    }
+    async function saveMonitorNodes() {
+      if (!monitorNodeDraft || monitorNodeSaving || document.getElementById('monitor-node-save').disabled) return;
+      const draft = monitorNodeDraft;
+      const keys = Array.from(document.querySelectorAll('#monitor-node-options input:checked'), input => input.value);
+      monitorNodeSaving = true;document.getElementById('monitor-node-save').disabled = true;
+      try {
+        const response = await fetch('/api/monitor/nodes', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:draft.group,keys,revision:draft.revision}),signal:AbortSignal.timeout(8000)});
+        const data = await response.json();if (!response.ok) throw Error(data.error || 'Không lưu được lựa chọn');
+        if (monitorSnapshot) monitorSnapshot.selection = data;
+        document.getElementById('monitor-node-dialog').close();renderMonitor(currentNodes);await fetchMonitor();
+      } catch (error) { document.getElementById('monitor-node-message').textContent = error.message; }
+      finally { monitorNodeSaving = false;document.getElementById('monitor-node-save').disabled = false; }
+    }
+
+    function renderMonitorControl() {
+      const button=document.getElementById('monitor-toggle'),enabled=!!monitorSnapshot?.enabled;
+      button.textContent=monitorToggleBusy?'Đang cập nhật…':'MONITOR: '+(enabled?'ON':'OFF');
+      button.disabled=monitorToggleBusy||!monitorSnapshot||monitorSnapshot.available===false;
+      button.setAttribute('aria-pressed',String(enabled));
+      button.className='rounded-lg px-4 py-2 font-bold text-white disabled:opacity-50 '+(enabled?'bg-emerald-600':'bg-red-600');
+      document.getElementById('monitor-toggle-message').textContent=monitorToggleNote||(!monitorSnapshot?monitorError:'');
+    }
+    async function toggleMonitor() {
+      if(monitorToggleBusy||!monitorSnapshot||monitorSnapshot.available===false)return;
+      monitorToggleBusy=true;monitorToggleNote='';renderMonitorControl();
+      try {
+        const response=await fetch('/api/monitor/control',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!monitorSnapshot.enabled,revision:monitorSnapshot.selection.revision}),signal:AbortSignal.timeout(8000)});
+        const result=await response.json();if(!response.ok)throw Error(result.error||'Không lưu được trạng thái Monitor');
+        monitorRequestVersion++;monitorSnapshot={...monitorSnapshot,enabled:monitorSnapshot.available!==false&&result.monitoringEnabled,selection:result};renderMonitor(currentNodes);await fetchMonitor();
+      }catch(error){monitorToggleNote=error.message;}
+      finally{monitorToggleBusy=false;renderMonitorControl();}
+    }
+
+    async function fetchMonitor() {
+      if (monitorFetching) return;
+      monitorFetching = true;const requestVersion=monitorRequestVersion;
+      try {
+        const response = await fetch('/api/monitor', {cache:'no-store', signal:AbortSignal.timeout(8000)});
+        if (!response.ok) throw Error('Monitor HTTP ' + response.status);
+        const data=await response.json();if(requestVersion!==monitorRequestVersion)return;monitorSnapshot=data;
+        monitorError = '';
+      } catch (_) {
+        if(requestVersion!==monitorRequestVersion)return;monitorSnapshot = null;
+        monitorError = 'Mất kết nối bộ đọc Monitor; chưa có dữ liệu mới.';
+      } finally { monitorFetching = false; renderMonitor(currentNodes); }
+    }
+    setInterval(() => {
+      if (!document.hidden && !document.getElementById('dashboard-section').classList.contains('hidden') && !document.getElementById('section-monitor').classList.contains('hidden')) fetchMonitor();
+    }, 1000);
 
     async function loadAllData() {
       await fetchNodes();
       await fetchNumbers();
+      renderMonitor(currentNodes);
       if (!document.getElementById('section-report').classList.contains('hidden')) {
         loadReports();
       }
@@ -579,16 +748,23 @@
       const res = await fetch('/api/nodes');
       currentNodes = await res.json();
       renderNodes(currentNodes);
+      renderMonitor(currentNodes);
+
       populateNodeDropdowns(currentNodes);
     }
 
     // RENDER BẢNG NODE: KHÔNG CÒN STICKY ĐÈ CHỮ
+    // Display-only mappings; these nodes are not added to COLL/TLS Excel import.
+    const additionalPublicIps = { '10.10.101.171': '125.212.211.244', '10.10.101.90': '203.113.174.27' };
     function renderNodes(nodes) {
       const tbody = document.getElementById('nodes-tbody');
       tbody.innerHTML = nodes.map(n => `
         <tr class="border-b border-gray-200 hover:bg-gray-50">
           <td class="py-2.5 px-3 md:px-4 font-bold text-gray-800">${n.id}</td>
-          <td class="py-2.5 px-3 md:px-4 text-gray-600 font-mono text-xs">${n.host}</td>
+          <td class="py-2.5 px-3 md:px-4 text-gray-600 font-mono text-xs">
+            <div class="whitespace-nowrap">${n.host}</div>
+            <div class="text-[11px] text-slate-500 mt-1 whitespace-nowrap">${window.PhoneImport?.targets.find(target => target.ip === n.host)?.publicIp || additionalPublicIps[n.host] || 'Chưa có mapping'}</div>
+          </td>
           <td class="py-2.5 px-2 text-center"><span class="bg-slate-600 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">${n.profile || 'COLLECTION'}</span></td>
           <td class="py-2.5 px-2 text-center">${n.health === 'UP' ? '<span class="text-emerald-600 font-semibold text-xs">🟢 UP</span>' : '<span class="text-rose-600 font-semibold text-xs">🔴 DOWN</span>'}</td>
           <td class="py-2.5 px-2 text-center"><span class="bg-emerald-500 text-white text-[11px] px-2 py-0.5 rounded-full font-bold">${n.active_num || 0}</span></td>
@@ -642,9 +818,11 @@
 
     // RENDER BẢNG SỐ: NẰM TRONG KHUNG CUỘN TỰ NHIÊN
     function renderNumbers(numbers) {
+  const selectionFilter = JSON.stringify(['search-phone','filter-node','filter-status'].map(id => document.getElementById(id).value));
   const tbody = document.getElementById('numbers-tbody');
   if (numbers.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500 font-semibold">Không tìm thấy số điện thoại phù hợp</td></tr>`;
+    numberSelection.render([], selectionFilter);
     return;
   }
 
@@ -683,12 +861,10 @@
         ${n.status === 'ACTIVE' ? `<button onclick="markBlockedAndSwap('${n.phone}', '${n.node_id}')" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] px-2 py-1 rounded font-bold shadow-sm transition inline-flex items-center"><i class="fas fa-sync-alt mr-1"></i>Đổi Số</button>` : '-'}
       </td>
 
-      <!-- NÚT XÓA -->
-      <td class="py-2 px-2 text-center">
-        <button onclick="deleteNumber('${n.phone}')" class="text-rose-500 hover:text-rose-700 font-bold p-1"><i class="fas fa-trash"></i></button>
-      </td>
+      <td class="py-2 px-2 text-center"><input type="checkbox" data-number-select="${Number.isSafeInteger(n.id)?n.id:0}" aria-label="Chọn số để xóa" style="width:18px;height:18px;vertical-align:middle"></td>
     </tr>
   `).join('');
+  numberSelection.render(numbers, selectionFilter);
 }
 
     async function updateNumberStatusDirectly(phone, newStatus) {
@@ -917,34 +1093,6 @@
       loadAllData();
     }
 
-    async function deleteNumber(phone) {
-      if (!confirm(`Xóa SĐT ${phone}?`)) return;
-      await fetch('/api/numbers/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
-      });
-      loadAllData();
-    }
-
-    async function bulkDeleteNumbers() {
-      const nodeId = document.getElementById('filter-node').value;
-      const status = document.getElementById('filter-status').value;
-
-      if (!confirm(`Xóa hàng loạt số theo bộ lọc (Node: ${nodeId}, Status: ${status})?`)) return;
-
-      const res = await fetch('/api/numbers/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodeId, status })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Đã xóa thành công ${data.deleted} SĐT!`);
-        loadAllData();
-      }
-    }
-
     // ==========================================
     // LOGIC CẤU HÌNH NGƯỠNG AUTO-SWAP
     // ==========================================
@@ -1019,7 +1167,6 @@
 
     function openAddNodeModal() { document.getElementById('modal-add-node').classList.remove('hidden'); }
     function openAddNumbersModal() { document.getElementById('modal-add-numbers').classList.remove('hidden'); }
-    function openUploadExcelModal() { document.getElementById('modal-upload-excel').classList.remove('hidden'); }
     function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
     // Hàm tự động đổi gợi ý Port khi chọn loại Node
@@ -1091,27 +1238,10 @@
       }
     }
 
-    async function submitUploadExcel() {
-      const fileInput = document.getElementById('excel-file-input');
-      if (!fileInput.files[0]) return alert('Vui lòng chọn file Excel!');
-
-      const formData = new FormData();
-      formData.append('file', fileInput.files[0]);
-
-      const res = await fetch('/api/numbers/upload-excel', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Import thành công ${data.count} số điện thoại!`);
-        closeModal('modal-upload-excel');
-        fileInput.value = '';
-        loadAllData();
-      } else {
-        alert(data.error || 'Lỗi khi import Excel!');
-      }
-    }
   </script>
+<script src="/js/phone-import-core.js?v=20261102-1"></script>
+<script src="/js/phone-import-transport.js?v=20261102-1"></script>
+<script src="/js/phone-import-ui.js?v=20261102-1"></script>
+<script src="/js/monitor-number-status.js?v=20261103-2"></script>
 </body>
 </html>

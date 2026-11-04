@@ -27,15 +27,11 @@
 __pycache__/
 *.pyc
 
-!/tests/low-vt-fallback.test.js
-!/tests/storage-retention.test.js
-!/tests/os01.test.js
-!/tests/node-picker.test.js
-!/tests/node-picker-browser.test.js
 
-!/tests/os01-cdr-only.test.js
 
-!/tests/managed-nodes.test.js
 
 # Private preview deployment access and tooling
 /.monitor-deploy/
+
+# Keep server diagnostic tests local
+/freeswitch-automation-source/test-*.js
